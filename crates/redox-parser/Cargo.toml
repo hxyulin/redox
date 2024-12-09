@@ -1,0 +1,12 @@
+[package]
+name = "redox-parser"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+redox-ast.workspace = true
+redox-lexer.workspace = true
+thiserror.workspace = true
+pretty_assertions.workspace = true
+rstest.workspace = true

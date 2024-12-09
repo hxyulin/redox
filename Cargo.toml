@@ -1,0 +1,21 @@
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "Apache-2.0"
+license-file = "LICENSE"
+repository = "https://github.com/hxyulin/redox"
+readme = "README.md"
+authors = ["hxyulin <hxyulin@proton.me>"]
+
+[workspace]
+resolver = "2"
+members = ["crates/redox-ast", "crates/redox-lexer", "crates/redox-parser"]
+default-members = ["crates/redox-ast", "crates/redox-lexer"]
+
+[workspace.dependencies]
+redox-ast = { path = "crates/redox-ast" }
+redox-lexer = { path = "crates/redox-lexer" }
+redox-parser = { path = "crates/redox-parser" }
+thiserror = "2.0.6"
+pretty_assertions = "1.4.1"
+rstest = "0.23.0"

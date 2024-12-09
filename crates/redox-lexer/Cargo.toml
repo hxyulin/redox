@@ -1,0 +1,11 @@
+[package]
+name = "redox-lexer"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+pretty_assertions.workspace = true
+rstest.workspace = true
+logos = "0.15.0"
