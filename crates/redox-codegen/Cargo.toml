@@ -1,0 +1,9 @@
+[package]
+name = "redox-codegen"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+rxir.workspace = true
+inkwell = { version = "0.5.0", features = ["llvm18-0-prefer-static"] }

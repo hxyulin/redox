@@ -1,0 +1,9 @@
+[package]
+name = "redox-type-checker"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+redox-ast.workspace = true
+thiserror.workspace = true

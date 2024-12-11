@@ -1,0 +1,2 @@
+[target.'cfg(target_os = "macos")'.env]
+LLVM_SYS_180_PREFIX = "/opt/homebrew/opt/llvm@18"

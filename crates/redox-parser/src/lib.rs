@@ -81,30 +81,39 @@ impl<'ctx> Parser<'ctx> {
 
         while let Some(tok) = self.advance()? {
             match tok {
-                Token::KwFn => top_levels.push(self.parse_function_def()?),
+                Token::KwFn => top_levels.push(TopLevel::expr(self.parse_function_def()?)),
                 _ => todo!(),
             }
         }
         Ok(top_levels)
     }
 
-    fn parse_function_def(&mut self) -> Result<TopLevel, ParseError> {
-        let ident = self.advance()?.ok_or(ParseError::UnexpectedEOF)?;
-        let _ = self.expect_advance(Token::LeftParen)?;
+    fn parse_function_def(&mut self) -> Result<Expr, ParseError> {
+        let name = match self.advance()?.ok_or(ParseError::UnexpectedEOF)? {
+            Token::Ident(ident) => ident,
+            _ => todo!(),
+        };
+
+        self.expect_advance(Token::LeftParen)?;
 
         // TODO: parse arguments
 
-        let _ = self.expect_advance(Token::RightParen)?;
+        self.advance()?.ok_or(ParseError::UnexpectedEOF)?; // Simulate parsing the arguments
+        self.expect(Token::RightParen)?;
 
         // TODO: Parse optional return type
         self.advance()?.ok_or(ParseError::UnexpectedEOF)?; // Simulate parsing the param list
-        let _ = self.expect(Token::LeftBrace)?;
+        self.expect(Token::LeftBrace)?;
 
         // TODO: Parse body
 
-        let _ = self.expect(Token::RightBrace)?;
+        self.advance()?.ok_or(ParseError::UnexpectedEOF)?; // Simulate parsing the body
+        self.expect(Token::RightBrace)?;
 
-        unimplemented!()
+        Ok(Expr::new(
+            ExprKind::FunctionDef { name },
+            std::ops::Range::default(),
+        ))
     }
 
     fn parse_block(&mut self) -> Result<Vec<TopLevel>, ParseError> {
@@ -113,5 +122,26 @@ impl<'ctx> Parser<'ctx> {
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
         todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_function_def() {
+        let mut parser = Parser::with_source("fn foo() {}");
+        let top_levels = parser.parse().unwrap();
+        assert_eq!(top_levels.len(), 1);
+        assert_eq!(
+            top_levels[0],
+            TopLevel::expr(Expr::new(
+                ExprKind::FunctionDef {
+                    name: "foo".to_string()
+                },
+                std::ops::Range::default()
+            ))
+        );
     }
 }

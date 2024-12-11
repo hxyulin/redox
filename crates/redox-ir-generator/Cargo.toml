@@ -1,0 +1,9 @@
+[package]
+name = "redox-ir-generator"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+redox-ast.workspace = true
+rxir.workspace = true

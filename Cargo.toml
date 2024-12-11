@@ -9,13 +9,37 @@ authors = ["hxyulin <hxyulin@proton.me>"]
 
 [workspace]
 resolver = "2"
-members = ["crates/redox-ast", "crates/redox-lexer", "crates/redox-parser"]
-default-members = ["crates/redox-ast", "crates/redox-lexer"]
+members = [
+    "crates/redox-ast",
+    "crates/redox-cli",
+    "crates/redox-codegen",
+    "crates/redox-ir-generator",
+    "crates/redox-ir-optimizer",
+    "crates/redox-lexer",
+    "crates/redox-parser",
+    "crates/redox-type-checker",
+    "crates/rxir",
+]
+default-members = [
+    "crates/redox-ast",
+    "crates/redox-lexer",
+    "crates/redox-parser",
+    "crates/rxir",
+    "crates/redox-type-checker",
+    "crates/redox-ir-generator",
+    "crates/redox-ir-optimizer",
+    "crates/redox-cli",
+]
 
 [workspace.dependencies]
 redox-ast = { path = "crates/redox-ast" }
 redox-lexer = { path = "crates/redox-lexer" }
 redox-parser = { path = "crates/redox-parser" }
+redox-type-checker = { path = "crates/redox-type-checker" }
+rxir = { path = "crates/rxir" }
+redox-ir-generator = { path = "crates/redox-ir-generator" }
+redox-ir-optimizer = { path = "crates/redox-ir-optimizer" }
+redox-codegen = { path = "crates/redox-codegen" }
 thiserror = "2.0.6"
 pretty_assertions = "1.4.1"
 rstest = "0.23.0"

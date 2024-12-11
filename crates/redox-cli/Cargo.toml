@@ -1,0 +1,17 @@
+[package]
+name = "redox-cli"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+redox-lexer.workspace = true
+redox-parser.workspace = true
+redox-ast.workspace = true
+redox-type-checker.workspace = true
+rxir.workspace = true
+redox-ir-generator.workspace = true
+redox-ir-optimizer.workspace = true
+redox-codegen.workspace = true
+clap = { version = "4.5.23", features = ["derive"] }
+clio = { version = "0.3.5", features = ["clap", "clap-parse"] }
