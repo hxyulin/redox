@@ -1,4 +1,4 @@
-use redox_ast::{Expr, ExprKind, TopLevel, TopLevelKind};
+use redox_ast::{Expr, ExprKind, TopLevel, TopLevelKind, Type as AstType};
 use rxir::{Function, Module, ModuleBuilder};
 
 // Now it has been type checked, any additional errors are panics
@@ -27,12 +27,28 @@ impl IrGenerator {
         match &node.kind {
             // We need a seperate top level expr generator
             TopLevelKind::Expr(expr) => match &expr.kind {
-                ExprKind::FunctionDef { name } => {
+                ExprKind::FunctionDef(function) => {
                     let entry = builder.create_block();
-                    builder.build_function(name.clone(), entry);
+                    builder.build_function(
+                        function.name.clone(),
+                        Self::rxir_type(function.return_ty.as_ref().unwrap()),
+                        entry,
+                    );
                 }
                 _ => todo!(),
             },
+        }
+    }
+
+    fn rxir_type(ty: &AstType) -> rxir::Type {
+        match ty {
+            AstType::Tuple(types) => {
+                if types.is_empty() {
+                    rxir::Type::Void
+                } else {
+                    unimplemented!("Tuple types are not supported in the IR yet")
+                }
+            }
         }
     }
 }

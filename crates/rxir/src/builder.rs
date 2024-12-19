@@ -1,4 +1,4 @@
-use crate::{Block, BlockId, Function, Module};
+use crate::{Block, BlockId, Function, Module, Type};
 
 pub struct ModuleBuilder {
     blocks: Vec<Block>,
@@ -19,9 +19,10 @@ impl ModuleBuilder {
         self.blocks.len() - 1
     }
 
-    pub fn build_function(&mut self, name: String, entry: BlockId) {
+    pub fn build_function(&mut self, signature: String, return_ty: Type, entry: BlockId) {
         let function = Function {
-            signature: name,
+            signature,
+            return_ty,
             entry,
         };
         self.functions.push(function);

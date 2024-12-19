@@ -54,7 +54,7 @@ impl IsTopLevel for ExprKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Literal(Literal),
-    FunctionDef { name: String },
+    FunctionDef(FunctionDef),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,4 +70,11 @@ impl TopLevel {
         let range = expr.span.clone();
         Self::new(TopLevelKind::Expr(Box::new(expr)), range)
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionDef {
+    pub name: String,
+    // Could be unknown, and deduced during type checking
+    pub return_ty: Option<Type>,
 }

@@ -46,6 +46,7 @@ pub struct Function {
     /// This string can only be ascii, and is the mangled name of the function.
     pub signature: String,
     pub entry: BlockId,
+    pub return_ty: Type,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -76,4 +77,3 @@ pub enum Instruction {
 // // When loading, we dont need to alloca
 // let b = load a
 // return b
-

@@ -1,4 +1,4 @@
-use redox_ast::{Expr, ExprKind, Literal, TopLevel, TopLevelKind, Type};
+use redox_ast::{Expr, ExprKind, FunctionDef, Literal, TopLevel, TopLevelKind, Type};
 use redox_lexer::{Lexer, LexerError, LexerTrait, Span, Token};
 
 pub struct Parser<'ctx> {
@@ -55,6 +55,17 @@ impl<'ctx> Parser<'ctx> {
         Ok(Some(tok))
     }
 
+    fn advance_no_eof(&mut self) -> Result<Token, ParseError> {
+        self.advance()?.ok_or(ParseError::UnexpectedEOF)
+    }
+
+    fn current(&mut self) -> Result<Token, ParseError> {
+        self.current_tok
+            .as_ref()
+            .ok_or(ParseError::UnexpectedEOF)
+            .map(|t| t.0.clone())
+    }
+
     fn expect_advance(&mut self, expected: Token) -> Result<Token, ParseError> {
         let tok = self.advance()?.ok_or(ParseError::UnexpectedEOF)?;
         if tok != expected {
@@ -64,12 +75,7 @@ impl<'ctx> Parser<'ctx> {
     }
 
     fn expect(&mut self, expected: Token) -> Result<(), ParseError> {
-        let tok = self
-            .current_tok
-            .as_ref()
-            .ok_or(ParseError::UnexpectedEOF)?
-            .0
-            .clone();
+        let tok = self.current()?;
         if tok != expected {
             return Err(ParseError::UnexpectedToken(tok));
         }
@@ -89,7 +95,7 @@ impl<'ctx> Parser<'ctx> {
     }
 
     fn parse_function_def(&mut self) -> Result<Expr, ParseError> {
-        let name = match self.advance()?.ok_or(ParseError::UnexpectedEOF)? {
+        let name = match self.advance_no_eof()? {
             Token::Ident(ident) => ident,
             _ => todo!(),
         };
@@ -98,11 +104,15 @@ impl<'ctx> Parser<'ctx> {
 
         // TODO: parse arguments
 
-        self.advance()?.ok_or(ParseError::UnexpectedEOF)?; // Simulate parsing the arguments
+        self.advance_no_eof()?; // Simulate parsing the arguments
         self.expect(Token::RightParen)?;
 
-        // TODO: Parse optional return type
-        self.advance()?.ok_or(ParseError::UnexpectedEOF)?; // Simulate parsing the param list
+        let return_ty = if let Token::Arrow = self.advance_no_eof()? {
+            self.advance_no_eof()?;
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
         self.expect(Token::LeftBrace)?;
 
         // TODO: Parse body
@@ -111,7 +121,7 @@ impl<'ctx> Parser<'ctx> {
         self.expect(Token::RightBrace)?;
 
         Ok(Expr::new(
-            ExprKind::FunctionDef { name },
+            ExprKind::FunctionDef(FunctionDef { name, return_ty }),
             std::ops::Range::default(),
         ))
     }
@@ -122,6 +132,21 @@ impl<'ctx> Parser<'ctx> {
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
         todo!()
+    }
+
+    /// Parses a type, assuming the first token is consumed
+    fn parse_type(&mut self) -> Result<Type, ParseError> {
+        match self.current()? {
+            Token::LeftParen => match self.advance()?.ok_or(ParseError::UnexpectedEOF)? {
+                Token::RightParen => {
+                    self.advance()?;
+                    Ok(Type::empty())
+                }
+                Token::Ident(_) => unimplemented!("Proper type parsing is not yet implemented!"),
+                tok => Err(ParseError::UnexpectedToken(tok)),
+            },
+            tok => Err(ParseError::UnexpectedToken(tok)),
+        }
     }
 }
 
@@ -137,9 +162,10 @@ mod tests {
         assert_eq!(
             top_levels[0],
             TopLevel::expr(Expr::new(
-                ExprKind::FunctionDef {
-                    name: "foo".to_string()
-                },
+                ExprKind::FunctionDef(FunctionDef {
+                    name: "foo".to_string(),
+                    return_ty: None,
+                }),
                 std::ops::Range::default()
             ))
         );

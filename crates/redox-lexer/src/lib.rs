@@ -37,12 +37,15 @@ pub enum Token {
 
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     Ident(String),
+
+    #[token("->")]
+    Arrow,
 }
 
 #[cfg(test)]
 mod tests {
     use {
-        super::{LexerError, LexerTrait, Token},
+        super::{LexerTrait, Token},
         pretty_assertions::assert_eq,
         rstest::rstest,
     };
@@ -54,6 +57,7 @@ mod tests {
     #[case("{", Token::LeftBrace)]
     #[case("}", Token::RightBrace)]
     #[case("foo", Token::Ident("foo".to_string()))]
+    #[case("->", Token::Arrow)]
     fn test_lexing_tok(#[case] input: &str, #[case] expected: Token) {
         let mut lexer = Token::lexer(input);
         let tok = lexer.next();

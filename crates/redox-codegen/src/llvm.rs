@@ -8,7 +8,7 @@ use inkwell::{
     llvm_sys::{target_machine, LLVMCallConv},
     module::Module,
     targets::{Target, TargetMachine, TargetTriple},
-    types::BasicMetadataTypeEnum,
+    types::{AnyType, BasicMetadataTypeEnum},
 };
 
 pub struct LLVMContext {
@@ -48,9 +48,15 @@ impl<'ctx> LLVMCodegenBackend<'ctx> {
         module: &rxir::Module,
         function: &rxir::Function,
     ) -> Result<(), String> {
-        let llvm_return_type = self.context.void_type();
+        // If the function is 'main', then we need to do some manipulation of the return type
+        let is_main = function.signature == "main";
         let args: Vec<BasicMetadataTypeEnum> = Vec::new();
-        let fn_type = llvm_return_type.fn_type(&args, false);
+        let fn_type = if is_main {
+            self.context.i32_type().fn_type(&args, false)
+        } else {
+            // TODO: Conversion from rxir::Type to LLVMType
+            self.context.void_type().fn_type(&args, false)
+        };
         let llvm_fn = self
             .module
             .add_function(function.signature.as_str(), fn_type, None);
@@ -59,7 +65,14 @@ impl<'ctx> LLVMCodegenBackend<'ctx> {
         llvm_fn.set_call_conventions(LLVMCallConv::LLVMCCallConv as u32);
         let entry = self.context.append_basic_block(llvm_fn, "entry");
         self.builder.position_at_end(entry);
-        self.builder.build_return(None).unwrap();
+        if is_main {
+            // TODO: We will probably need to do some sort of 'find and replace' here, since the
+            // expression codegen will automatically generate a return statement for us.
+            self.builder
+                .build_return(Some(&self.context.i32_type().const_int(0, false))).unwrap();
+        } else {
+            self.builder.build_return(None).unwrap();
+        }
         Ok(())
     }
 }
