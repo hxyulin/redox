@@ -5,6 +5,7 @@ version.workspace = true
 authors.workspace = true
 
 [dependencies]
+redox-ast.workspace = true
 thiserror.workspace = true
 pretty_assertions.workspace = true
 rstest.workspace = true

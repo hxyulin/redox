@@ -10,3 +10,4 @@ redox-lexer.workspace = true
 thiserror.workspace = true
 pretty_assertions.workspace = true
 rstest.workspace = true
+tracing.workspace = true

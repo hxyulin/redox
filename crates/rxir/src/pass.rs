@@ -33,8 +33,8 @@ impl PassManager {
         for verifier in &mut self.verifiers {
             verifier.run(module)?;
         }
-        for optiizer in &mut self.optimizers {
-            optiizer.run(module);
+        for optimizer in &mut self.optimizers {
+            optimizer.run(module);
         }
         Ok(())
     }

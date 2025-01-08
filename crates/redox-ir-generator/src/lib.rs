@@ -1,5 +1,5 @@
 use redox_ast::{Expr, ExprKind, TopLevel, TopLevelKind, Type as AstType};
-use rxir::{Function, Module, ModuleBuilder};
+use rxir::{Function, Module, ModuleBuilder, Operand};
 
 // Now it has been type checked, any additional errors are panics
 pub struct IrGenerator {}
@@ -34,6 +34,15 @@ impl IrGenerator {
                         Self::rxir_type(function.return_ty.as_ref().unwrap()),
                         entry,
                     );
+
+                    // TODO: This is just a placeholder, maybe we should add the type to the return
+                    // as well?
+                    builder.build_instruction(
+                        entry,
+                        rxir::Instruction::Return {
+                            value: Some(Operand::Immediate(42)),
+                        },
+                    );
                 }
                 _ => todo!(),
             },
@@ -41,6 +50,7 @@ impl IrGenerator {
     }
 
     fn rxir_type(ty: &AstType) -> rxir::Type {
+        use redox_ast::NumberKind;
         match ty {
             AstType::Tuple(types) => {
                 if types.is_empty() {
@@ -49,6 +59,16 @@ impl IrGenerator {
                     unimplemented!("Tuple types are not supported in the IR yet")
                 }
             }
+            AstType::Number(ty) => match ty.kind {
+                NumberKind::Signed => {
+                    if ty.bits == 32 {
+                        rxir::Type::Signed32
+                    } else {
+                        unimplemented!("Only signed 32-bit integers are supported in the IR yet")
+                    }
+                }
+                _ => unimplemented!("Only signed integers are supported in the IR yet"),
+            },
         }
     }
 }

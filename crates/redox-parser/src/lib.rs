@@ -1,5 +1,9 @@
-use redox_ast::{Expr, ExprKind, FunctionDef, Literal, TopLevel, TopLevelKind, Type};
+use redox_ast::{
+    Attributes, Block, Expr, ExprKind, FunctionDef, Literal, TopLevel, TopLevelKind, Type,
+};
 use redox_lexer::{Lexer, LexerError, LexerTrait, Span, Token};
+use std::str::FromStr;
+use tracing::instrument;
 
 pub struct Parser<'ctx> {
     lexer: Lexer<'ctx>,
@@ -32,6 +36,7 @@ impl std::fmt::Display for ParseError {
 }
 
 impl<'ctx> Parser<'ctx> {
+    #[instrument(skip(lexer))]
     pub fn new(lexer: Lexer<'ctx>) -> Self {
         Self {
             lexer,
@@ -39,11 +44,14 @@ impl<'ctx> Parser<'ctx> {
         }
     }
 
+    #[instrument(skip(source))]
     pub fn with_source(source: &'ctx str) -> Self {
         Self::new(Token::lexer(source))
     }
 
+    #[instrument(skip(self))]
     fn advance(&mut self) -> Result<Option<Token>, ParseError> {
+        tracing::trace!("Advance");
         let tok = if let Some(tok) = self.lexer.next() {
             tok?
         } else {
@@ -55,18 +63,24 @@ impl<'ctx> Parser<'ctx> {
         Ok(Some(tok))
     }
 
+    #[instrument(skip(self))]
     fn advance_no_eof(&mut self) -> Result<Token, ParseError> {
+        tracing::trace!("Advance ensuring no EOF");
         self.advance()?.ok_or(ParseError::UnexpectedEOF)
     }
 
+    #[instrument(skip(self))]
     fn current(&mut self) -> Result<Token, ParseError> {
+        tracing::trace!("Current token");
         self.current_tok
             .as_ref()
             .ok_or(ParseError::UnexpectedEOF)
             .map(|t| t.0.clone())
     }
 
+    #[instrument(skip(self))]
     fn expect_advance(&mut self, expected: Token) -> Result<Token, ParseError> {
+        tracing::trace!(?expected, "Expecting advance");
         let tok = self.advance()?.ok_or(ParseError::UnexpectedEOF)?;
         if tok != expected {
             return Err(ParseError::UnexpectedToken(tok));
@@ -74,7 +88,9 @@ impl<'ctx> Parser<'ctx> {
         Ok(tok)
     }
 
+    #[instrument(skip(self))]
     fn expect(&mut self, expected: Token) -> Result<(), ParseError> {
+        tracing::trace!(?expected, "Expecting token");
         let tok = self.current()?;
         if tok != expected {
             return Err(ParseError::UnexpectedToken(tok));
@@ -82,7 +98,9 @@ impl<'ctx> Parser<'ctx> {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     pub fn parse(&mut self) -> Result<Vec<TopLevel>, ParseError> {
+        tracing::trace!("Started parsing");
         let mut top_levels = Vec::new();
 
         while let Some(tok) = self.advance()? {
@@ -94,7 +112,10 @@ impl<'ctx> Parser<'ctx> {
         Ok(top_levels)
     }
 
+    #[instrument(skip(self))]
     fn parse_function_def(&mut self) -> Result<Expr, ParseError> {
+        tracing::trace!("Parsing function definition");
+        let attributes: Attributes = Vec::new();
         let name = match self.advance_no_eof()? {
             Token::Ident(ident) => ident,
             _ => todo!(),
@@ -114,37 +135,99 @@ impl<'ctx> Parser<'ctx> {
             None
         };
         self.expect(Token::LeftBrace)?;
-
-        // TODO: Parse body
-
-        self.advance()?.ok_or(ParseError::UnexpectedEOF)?; // Simulate parsing the body
-        self.expect(Token::RightBrace)?;
+        let body = self.parse_block()?;
+        // Parse block already consumes the right brace, and we dont' need to check for it here
 
         Ok(Expr::new(
-            ExprKind::FunctionDef(FunctionDef { name, return_ty }),
+            ExprKind::FunctionDef(FunctionDef {
+                name,
+                return_ty,
+                attributes,
+                body,
+            }),
             std::ops::Range::default(),
         ))
     }
 
-    fn parse_block(&mut self) -> Result<Vec<TopLevel>, ParseError> {
-        unimplemented!()
+    /// Parses a block, assuming the current token is the left brace
+    #[instrument(skip(self))]
+    fn parse_block(&mut self) -> Result<Block, ParseError> {
+        tracing::trace!("Parsing block");
+        let mut statements = Vec::new();
+
+        while let Some(tok) = self.advance()? {
+            match tok {
+                Token::RightBrace => break,
+                Token::LeftBrace => unimplemented!("Nested blocks are not yet supported"),
+                _ => {
+                    let statement = self.parse_statement()?;
+                    statements.push(statement);
+                }
+            }
+        }
+
+        Ok(Block {
+            statements,
+            attributes: Vec::new(),
+        })
     }
 
+    #[instrument(skip(self))]
+    fn parse_statement(&mut self) -> Result<Expr, ParseError> {
+        tracing::trace!("Parsing statement");
+        // TODO: We need to respect semiclons
+        let res = match self.current()? {
+            Token::KwReturn => {
+                self.advance()?;
+                let expr = self.parse_expr()?;
+                Expr::new(
+                    ExprKind::Return(Some(Box::new(expr))),
+                    std::ops::Range::default(),
+                )
+            }
+            _ => self.parse_expr()?,
+        };
+
+        self.expect(Token::Semicolon)?;
+        // Consume the semicolon
+        self.advance()?;
+        Ok(res)
+    }
+
+    #[instrument(skip(self))]
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        todo!()
+        tracing::trace!("Parsing expression");
+        match self.current()? {
+            Token::NumberLit(num) => {
+                self.advance()?;
+                Ok(Expr::new(
+                    ExprKind::Literal(Literal::Number(num)),
+                    std::ops::Range::default(),
+                ))
+            }
+            Token::KwReturn => self.parse_statement(),
+            tok => todo!("Unexpected token (unimplemented): {:?}", tok),
+        }
     }
 
     /// Parses a type, assuming the first token is consumed
+    #[instrument(skip(self))]
     fn parse_type(&mut self) -> Result<Type, ParseError> {
+        tracing::trace!("Parsing type");
         match self.current()? {
             Token::LeftParen => match self.advance()?.ok_or(ParseError::UnexpectedEOF)? {
                 Token::RightParen => {
                     self.advance()?;
                     Ok(Type::empty())
                 }
-                Token::Ident(_) => unimplemented!("Proper type parsing is not yet implemented!"),
-                tok => Err(ParseError::UnexpectedToken(tok)),
+                _ => unimplemented!("Proper type parsing is not yet implemented!"),
             },
+            Token::Ident(ty) => {
+                self.advance()?;
+                // TODO: Support custom error messages
+                Ok(Type::from_str(&ty)
+                    .map_err(|_err| ParseError::UnexpectedToken(Token::Ident(ty)))?)
+            }
             tok => Err(ParseError::UnexpectedToken(tok)),
         }
     }
@@ -153,6 +236,7 @@ impl<'ctx> Parser<'ctx> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use redox_ast::Block;
 
     #[test]
     fn test_parse_function_def() {
@@ -165,6 +249,8 @@ mod tests {
                 ExprKind::FunctionDef(FunctionDef {
                     name: "foo".to_string(),
                     return_ty: None,
+                    attributes: Vec::new(),
+                    body: Block::empty(),
                 }),
                 std::ops::Range::default()
             ))

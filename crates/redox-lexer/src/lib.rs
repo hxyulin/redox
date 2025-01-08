@@ -6,12 +6,16 @@ use logos::Logos;
 pub enum LexerError {
     #[default]
     NonAsciiCharacter,
+    ParseIntError(std::num::ParseIntError),
+    ParseFloatError(std::num::ParseFloatError),
 }
 
 impl std::fmt::Display for LexerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NonAsciiCharacter => write!(f, "Non-ascii character"),
+            Self::ParseIntError(err) => write!(f, "Parse int error: {}", err),
+            Self::ParseFloatError(err) => write!(f, "Parse float error: {}", err),
         }
     }
 }
@@ -22,6 +26,11 @@ impl std::fmt::Display for LexerError {
 pub enum Token {
     #[token("fn")]
     KwFn,
+    #[token("return")]
+    KwReturn,
+
+    #[token(";")]
+    Semicolon,
 
     #[token("(")]
     LeftParen,
@@ -35,11 +44,25 @@ pub enum Token {
     #[token("}")]
     RightBrace,
 
+    #[token("->")]
+    Arrow,
+
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     Ident(String),
 
-    #[token("->")]
-    Arrow,
+    #[regex(r"[0-9]+", parse_num_literal)]
+    NumberLit(redox_ast::NumberLiteral),
+}
+
+fn parse_num_literal(lex: &mut Lexer) -> Result<redox_ast::NumberLiteral, LexerError> {
+    let mut num = lex.slice().to_string();
+    let mut radix = 10;
+    if num.starts_with("0x") {
+        num = num[2..].to_string();
+        radix = 16;
+    }
+    let num = u64::from_str_radix(&num, radix).map_err(|err| LexerError::ParseIntError(err))?;
+    Ok(redox_ast::NumberLiteral::int32(num))
 }
 
 #[cfg(test)]

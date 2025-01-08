@@ -43,3 +43,5 @@ redox-codegen = { path = "crates/redox-codegen" }
 thiserror = "2.0.6"
 pretty_assertions = "1.4.1"
 rstest = "0.23.0"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"

@@ -2,13 +2,12 @@ use crate::CodegenBackend;
 use std::path::PathBuf;
 
 use inkwell::{
-    basic_block::BasicBlock,
     builder::Builder,
     context::Context,
-    llvm_sys::{target_machine, LLVMCallConv},
+    llvm_sys::LLVMCallConv,
     module::Module,
-    targets::{Target, TargetMachine, TargetTriple},
-    types::{AnyType, BasicMetadataTypeEnum},
+    targets::{Target, TargetMachine},
+    types::BasicMetadataTypeEnum,
 };
 
 pub struct LLVMContext {
@@ -48,7 +47,8 @@ impl<'ctx> LLVMCodegenBackend<'ctx> {
         module: &rxir::Module,
         function: &rxir::Function,
     ) -> Result<(), String> {
-        // If the function is 'main', then we need to do some manipulation of the return type
+        // FIXME: This is a hack to get the correct signature for the main function, we should
+        // probbaly make our own entrypoint and avoid libc stuff
         let is_main = function.signature == "main";
         let args: Vec<BasicMetadataTypeEnum> = Vec::new();
         let fn_type = if is_main {
@@ -69,7 +69,8 @@ impl<'ctx> LLVMCodegenBackend<'ctx> {
             // TODO: We will probably need to do some sort of 'find and replace' here, since the
             // expression codegen will automatically generate a return statement for us.
             self.builder
-                .build_return(Some(&self.context.i32_type().const_int(0, false))).unwrap();
+                .build_return(Some(&self.context.i32_type().const_int(0, false)))
+                .unwrap();
         } else {
             self.builder.build_return(None).unwrap();
         }
@@ -85,7 +86,7 @@ impl CodegenBackend for LLVMCodegenBackend<'_> {
         }
 
         // Verification
-        llvm_module.verify().map_err(|err| format!("{}", err))?;
+        llvm_module.verify().map_err(|err| err.to_string())?;
         for function in llvm_module.get_functions() {
             if !function.verify(false) {
                 return Err("Function verification failed".to_string());
@@ -95,21 +96,21 @@ impl CodegenBackend for LLVMCodegenBackend<'_> {
         // Linking into the module
         self.module
             .link_in_module(llvm_module)
-            .map_err(|err| format!("{}", err))?;
+            .map_err(|err| err.to_string())?;
 
         Ok(())
     }
 
     fn write_intermediate(&mut self, path: PathBuf) -> Result<(), String> {
         let string = self.module.print_to_string().to_string();
-        std::fs::write(path, string).map_err(|err| format!("{}", err))
+        std::fs::write(path, string).map_err(|err| err.to_string())
     }
 
     fn write_object(&mut self, path: PathBuf) -> Result<(), String> {
         // TODO: Set target, optimization level, etc...
         let cpu = "generic";
         let features = "";
-        let optiization = inkwell::OptimizationLevel::Default;
+        let optimization = inkwell::OptimizationLevel::Default;
         let triple = TargetMachine::get_default_triple();
         #[cfg(target_arch = "aarch64")]
         {
@@ -121,7 +122,7 @@ impl CodegenBackend for LLVMCodegenBackend<'_> {
                 &triple,
                 &cpu,
                 features,
-                optiization,
+                optimization,
                 inkwell::targets::RelocMode::Default,
                 inkwell::targets::CodeModel::Default,
             )
@@ -133,6 +134,6 @@ impl CodegenBackend for LLVMCodegenBackend<'_> {
                 inkwell::targets::FileType::Object,
                 path.as_path(),
             )
-            .map_err(|err| format!("{}", err))
+            .map_err(|err| err.to_string())
     }
 }

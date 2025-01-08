@@ -1,28 +1,13 @@
 use std::ops::Range;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Literal {
-    // TODO: add more, and differentiate bit widths
-    Int(i64),
-}
+pub mod literal;
+pub mod types;
+pub use {literal::*, types::*};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Type {
-    Tuple(Vec<Type>),
-}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Attribute {}
 
-impl Type {
-    pub fn empty() -> Self {
-        // Ensure it doesn't allocate
-        Type::Tuple(Vec::with_capacity(0))
-    }
-
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Type::Tuple(types) => types.is_empty(),
-        }
-    }
-}
+pub type Attributes = Vec<Attribute>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Wrapped<T> {
@@ -41,11 +26,25 @@ impl<T> Wrapped<T> {
     }
 }
 
-pub trait IsTopLevel {
-    fn is_top_level(&self) -> bool;
-}
-
-impl IsTopLevel for ExprKind {
+impl ExprKind {
+    fn get_children(&self) -> Vec<Box<Expr>> {
+        match self {
+            ExprKind::Literal(_) => Vec::new(),
+            ExprKind::Return(expr) => {
+                if let Some(expr) = expr {
+                    vec![expr.clone()]
+                } else {
+                    Vec::new()
+                }
+            }
+            ExprKind::FunctionDef(function_def) => function_def
+                .body
+                .statements
+                .iter()
+                .map(|expr| Box::new(expr.clone()))
+                .collect(),
+        }
+    }
     fn is_top_level(&self) -> bool {
         matches!(self, ExprKind::FunctionDef { .. })
     }
@@ -54,6 +53,7 @@ impl IsTopLevel for ExprKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Literal(Literal),
+    Return(Option<Box<Expr>>),
     FunctionDef(FunctionDef),
 }
 
@@ -64,6 +64,7 @@ pub enum TopLevelKind {
 
 pub type Expr = Wrapped<ExprKind>;
 pub type TopLevel = Wrapped<TopLevelKind>;
+pub type Ast = Vec<TopLevel>;
 
 impl TopLevel {
     pub fn expr(expr: Expr) -> Self {
@@ -77,4 +78,29 @@ pub struct FunctionDef {
     pub name: String,
     // Could be unknown, and deduced during type checking
     pub return_ty: Option<Type>,
+    pub attributes: Attributes,
+    pub body: Block,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block {
+    pub statements: Vec<Expr>,
+    pub attributes: Attributes,
+}
+
+impl Block {
+    pub const fn empty() -> Self {
+        Self {
+            statements: Vec::new(),
+            attributes: Vec::new(),
+        }
+    }
+}
+
+pub mod utils {
+    use crate::Ast;
+
+    pub fn to_string(ast: &Ast) -> String {
+        format!("{:#?}", ast)
+    }
 }

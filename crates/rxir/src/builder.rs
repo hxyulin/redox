@@ -1,4 +1,4 @@
-use crate::{Block, BlockId, Function, Module, Type};
+use crate::{Block, BlockId, Function, Instruction, Module, Type};
 
 pub struct ModuleBuilder {
     blocks: Vec<Block>,
@@ -26,6 +26,10 @@ impl ModuleBuilder {
             entry,
         };
         self.functions.push(function);
+    }
+
+    pub fn build_instruction(&mut self, block: BlockId, instruction: Instruction) {
+        self.blocks[block].instructions.push(instruction);
     }
 
     pub fn build(self, name: String) -> Module {
