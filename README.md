@@ -58,6 +58,16 @@ Other backends are not yet implemented.
 These can be easily installed using the [rustup](https://rustup.rs/) tool.
 
 ## Building
+
+## Prerequisites
+
+- Rust
+- Cargo
+On linux, the following lirbary is required:
+- llvm-18-dev
+- libpolly-18-dev
+- libzstd-dev
+
 To build the compiler, run the following command:
 ```bash
 cargo build

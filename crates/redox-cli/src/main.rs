@@ -21,6 +21,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
+
     let mut contents = String::new();
     args.input
         .open()
