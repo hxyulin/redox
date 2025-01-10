@@ -1,11 +1,24 @@
-use redox_ast::{Expr, ExprKind, TopLevel, TopLevelKind, Type as AstType};
-use rxir::{Function, Module, ModuleBuilder, Operand};
+use redox_ast::{Block, Expr, ExprKind, Literal, TopLevel, TopLevelKind, Type as AstType};
+use rxir::{BlockId, Function, Module, ModuleBuilder, Operand, TempVarId};
+use std::collections::HashMap;
 
 // Now it has been type checked, any additional errors are panics
 pub struct IrGenerator {}
 
 pub struct ModuleOps {
     pub name: String,
+}
+
+pub struct BlockMeta {
+    pub variables: HashMap<String, TempVarId>,
+}
+
+impl BlockMeta {
+    pub fn new() -> Self {
+        Self {
+            variables: HashMap::new(),
+        }
+    }
 }
 
 impl IrGenerator {
@@ -29,23 +42,77 @@ impl IrGenerator {
             TopLevelKind::Expr(expr) => match &expr.kind {
                 ExprKind::FunctionDef(function) => {
                     let entry = builder.create_block();
+                    let block = builder.get_block_mut(entry);
+                    let mut block_meta = BlockMeta::new();
+                    let arguments = function
+                        .arguments
+                        .iter()
+                        .map(|(name, ty)| {
+                            let ty = Self::rxir_type(ty);
+                            let id = block.create_var(ty.clone());
+                            block_meta.variables.insert(name.clone(), id);
+                            (id, ty)
+                        })
+                        .collect();
                     builder.build_function(
                         function.name.clone(),
+                        arguments,
                         Self::rxir_type(function.return_ty.as_ref().unwrap()),
                         entry,
                     );
 
-                    // TODO: This is just a placeholder, maybe we should add the type to the return
-                    // as well?
-                    builder.build_instruction(
-                        entry,
-                        rxir::Instruction::Return {
-                            value: Some(Operand::Immediate(42)),
-                        },
-                    );
+                    self.generate_block(builder, entry, &function.body, &mut block_meta);
                 }
                 _ => todo!(),
             },
+        }
+    }
+
+    fn generate_block(
+        &mut self,
+        builder: &mut ModuleBuilder,
+        block: BlockId,
+        body: &Block,
+        meta: &mut BlockMeta,
+    ) {
+        for statement in &body.statements {
+            self.generate_instruction(builder, block, statement, meta);
+        }
+    }
+
+    fn generate_instruction(
+        &mut self,
+        builder: &mut ModuleBuilder,
+        block: BlockId,
+        expr: &Expr,
+        meta: &mut BlockMeta,
+    ) {
+        match &expr.kind {
+            ExprKind::Return(expr) => {
+                let value = if let Some(expr) = expr {
+                    let value = match &expr.kind {
+                        ExprKind::Literal(literal) => match literal {
+                            Literal::Number(number) => Operand::Immediate {
+                                ty: Self::rxir_type(&number.kind.clone().into()),
+                                value: number.value,
+                            },
+                        },
+                        ExprKind::Variable(name) => {
+                            let id = meta.variables.get(name).unwrap();
+                            Operand::TempVar {
+                                ty: builder.get_var_type(block, *id),
+                                id: *id,
+                            }
+                        }
+                        _ => todo!(),
+                    };
+                    Some(value)
+                } else {
+                    None
+                };
+                builder.build_instruction(block, rxir::Instruction::Return { value });
+            }
+            _ => todo!(),
         }
     }
 

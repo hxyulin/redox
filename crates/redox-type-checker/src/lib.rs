@@ -1,9 +1,11 @@
 use redox_ast::{Block, Expr, ExprKind, TopLevel, TopLevelKind, Type};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum TypeCheckError {
     UnableToInferType,
     IncompatibleTypes { expected: Type, found: Type },
+    UnknownVariable(String),
 }
 
 impl std::fmt::Display for TypeCheckError {
@@ -13,6 +15,7 @@ impl std::fmt::Display for TypeCheckError {
             Self::IncompatibleTypes { expected, found } => {
                 write!(f, "Expected type {expected}, found type {found}")
             }
+            Self::UnknownVariable(name) => write!(f, "Unknown variable {name}"),
         }
     }
 }
@@ -22,7 +25,20 @@ pub struct TypeChecker {
 }
 
 struct FunctionContext {
+    arguments: Vec<(String, Type)>,
     return_ty: Option<Type>,
+}
+
+struct BlockContext {
+    variables: HashMap<String, Type>,
+}
+
+impl BlockContext {
+    fn new() -> Self {
+        Self {
+            variables: HashMap::new(),
+        }
+    }
 }
 
 impl TypeChecker {
@@ -36,14 +52,22 @@ impl TypeChecker {
                 TopLevelKind::Expr(expr) => match &mut expr.kind {
                     ExprKind::FunctionDef(function) => {
                         let mut ctx = FunctionContext {
+                            arguments: function.arguments.clone(),
                             return_ty: function.return_ty.clone(),
                         };
-                        self.evaluate_block(&mut function.body, &mut ctx)?;
+                        if !self.evaluate_block(&mut function.body, &mut ctx)? {
+                            return Err(TypeCheckError::IncompatibleTypes {
+                                expected: ctx.return_ty.clone().unwrap(),
+                                found: Type::empty(),
+                            });
+                        }
                         if function.return_ty.is_none() {
                             return Err(TypeCheckError::UnableToInferType);
                         }
                     }
-                    ExprKind::Literal(_) | ExprKind::Return(_) => unreachable!(),
+                    ExprKind::Literal(_) | ExprKind::Return(_) | ExprKind::Variable(_) => {
+                        unreachable!()
+                    }
                 },
             }
         }
@@ -55,13 +79,17 @@ impl TypeChecker {
         &mut self,
         block: &mut Block,
         ctx: &mut FunctionContext,
-    ) -> Result<(), TypeCheckError> {
+    ) -> Result<bool, TypeCheckError> {
+        let mut block_ctx = BlockContext::new();
+        for arg in &ctx.arguments {
+            block_ctx.variables.insert(arg.0.clone(), arg.1.clone());
+        }
         for (idx, statement) in &mut block.statements.iter_mut().enumerate() {
-            if self.evaluate_expr(statement, ctx)? {
-                break;
+            if self.evaluate_expr(statement, ctx, &mut block_ctx)? {
+                return Ok(true);
             }
         }
-        Ok(())
+        Ok(false)
     }
 
     /// Returns a type, and whether of not it was not a return statement
@@ -71,13 +99,14 @@ impl TypeChecker {
         &mut self,
         statement: &mut Expr,
         ctx: &mut FunctionContext,
+        block_ctx: &mut BlockContext,
     ) -> Result<bool, TypeCheckError> {
         // TODO: Control Flow evaluation
         match &mut statement.kind {
             ExprKind::Return(expr) => match expr {
                 Some(ref mut expr) => {
                     // We need it to evluate the type first
-                    self.evaluate_expr(expr, ctx)?;
+                    self.evaluate_expr(expr, ctx, block_ctx)?;
                     statement.ty.replace(Type::empty());
                     Ok(true)
                 }
@@ -89,6 +118,14 @@ impl TypeChecker {
             ExprKind::Literal(lit) => {
                 statement.ty.replace(lit.ty());
                 Ok(false)
+            }
+            ExprKind::Variable(name) => {
+                if let Some(ty) = block_ctx.variables.get(name) {
+                    statement.ty.replace(ty.clone());
+                    Ok(false)
+                } else {
+                    Err(TypeCheckError::UnknownVariable(name.clone()))
+                }
             }
             ExprKind::FunctionDef(..) => unimplemented!(),
         }

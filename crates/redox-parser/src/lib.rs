@@ -17,6 +17,7 @@ pub enum ParseError {
     LexerError(LexerError),
     UnexpectedEOF,
     UnexpectedToken(Token),
+    UnclosedComment,
 }
 
 impl From<LexerError> for ParseError {
@@ -31,6 +32,7 @@ impl std::fmt::Display for ParseError {
             Self::LexerError(err) => err.fmt(f),
             Self::UnexpectedEOF => write!(f, "Unexpected EOF"),
             Self::UnexpectedToken(tok) => write!(f, "Unexpected token: {tok:?}"),
+            Self::UnclosedComment => write!(f, "Unclosed comment"),
         }
     }
 }
@@ -51,9 +53,34 @@ impl<'ctx> Parser<'ctx> {
 
     #[instrument(skip(self))]
     fn advance(&mut self) -> Result<Option<Token>, ParseError> {
+        // FIXME: This is very bad coding here, a lot of repeated code
         tracing::trace!("Advance");
         let tok = if let Some(tok) = self.lexer.next() {
-            tok?
+            let mut tok = tok?;
+            if tok == Token::OpenComment {
+                tracing::trace!("Open comment");
+                let mut broken = false;
+                while let Some(tok) = self.lexer.next() {
+                    tracing::trace!(?tok, "Comment token");
+                    if tok? == Token::CloseComment {
+                        tracing::trace!("Close comment");
+                        broken = true;
+                        break;
+                    }
+                }
+
+                if !broken {
+                    return Err(ParseError::UnclosedComment);
+                }
+
+                if let Some(new_tok) = self.lexer.next() {
+                    tok = new_tok?;
+                } else {
+                    self.current_tok = None;
+                    return Ok(None);
+                };
+            }
+            tok
         } else {
             self.current_tok = None;
             return Ok(None);
@@ -122,10 +149,8 @@ impl<'ctx> Parser<'ctx> {
         };
 
         self.expect_advance(Token::LeftParen)?;
-
-        // TODO: parse arguments
-
-        self.advance_no_eof()?; // Simulate parsing the arguments
+        let arguments = self.parse_typed_argument_list()?;
+        tracing::trace!(?arguments, "Parsed arguments");
         self.expect(Token::RightParen)?;
 
         let return_ty = if let Token::Arrow = self.advance_no_eof()? {
@@ -141,6 +166,7 @@ impl<'ctx> Parser<'ctx> {
         Ok(Expr::new(
             ExprKind::FunctionDef(FunctionDef {
                 name,
+                arguments,
                 return_ty,
                 attributes,
                 body,
@@ -206,6 +232,13 @@ impl<'ctx> Parser<'ctx> {
                 ))
             }
             Token::KwReturn => self.parse_statement(),
+            Token::Ident(name) => {
+                self.advance()?;
+                Ok(Expr::new(
+                    ExprKind::Variable(name),
+                    std::ops::Range::default(),
+                ))
+            }
             tok => todo!("Unexpected token (unimplemented): {:?}", tok),
         }
     }
@@ -231,6 +264,30 @@ impl<'ctx> Parser<'ctx> {
             tok => Err(ParseError::UnexpectedToken(tok)),
         }
     }
+
+    #[instrument(skip(self))]
+    fn parse_typed_argument_list(&mut self) -> Result<Vec<(String, Type)>, ParseError> {
+        tracing::trace!("Parsing typed argument list");
+        let mut args = Vec::new();
+        while let Some(tok) = self.advance()? {
+            match tok {
+                Token::Ident(name) => {
+                    self.advance()?;
+                    self.expect(Token::Colon)?;
+                    self.advance()?;
+                    let ty = self.parse_type()?;
+                    tracing::trace!(?name, ?ty, "Parsed argument");
+                    args.push((name, ty));
+                }
+                tok => return Err(ParseError::UnexpectedToken(tok)),
+            }
+            match self.current()? {
+                Token::Comma => (),
+                _ => break,
+            }
+        }
+        Ok(args)
+    }
 }
 
 #[cfg(test)]
@@ -248,6 +305,7 @@ mod tests {
             TopLevel::expr(Expr::new(
                 ExprKind::FunctionDef(FunctionDef {
                     name: "foo".to_string(),
+                    arguments: Vec::new(),
                     return_ty: None,
                     attributes: Vec::new(),
                     body: Block::empty(),

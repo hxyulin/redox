@@ -1,5 +1,5 @@
 use crate::CodegenBackend;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use inkwell::{
     builder::Builder,
@@ -7,8 +7,10 @@ use inkwell::{
     llvm_sys::LLVMCallConv,
     module::Module,
     targets::{Target, TargetMachine},
-    types::BasicMetadataTypeEnum,
+    types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum},
+    values::{BasicValue, BasicValueEnum},
 };
+use rxir::Operand;
 
 pub struct LLVMContext {
     context: Context,
@@ -26,6 +28,18 @@ pub struct LLVMCodegenBackend<'ctx> {
     context: &'ctx Context,
     builder: Builder<'ctx>,
     module: Module<'ctx>,
+}
+
+struct BlockMeta<'ctx> {
+    variables: HashMap<rxir::TempVarId, BasicValueEnum<'ctx>>,
+}
+
+impl<'ctx> BlockMeta<'ctx> {
+    pub fn new() -> Self {
+        Self {
+            variables: HashMap::new(),
+        }
+    }
 }
 
 impl<'ctx> LLVMCodegenBackend<'ctx> {
@@ -49,12 +63,14 @@ impl<'ctx> LLVMCodegenBackend<'ctx> {
     ) -> Result<(), String> {
         // FIXME: This is a hack to get the correct signature for the main function, we should
         // probbaly make our own entrypoint and avoid libc stuff
-        let is_main = function.signature == "main";
-        let args: Vec<BasicMetadataTypeEnum> = Vec::new();
-        let fn_type = if is_main {
-            self.context.i32_type().fn_type(&args, false)
+        let args: Vec<BasicMetadataTypeEnum> = function
+            .arguments
+            .iter()
+            .map(|(_id, ty)| self.llvm_type(ty).unwrap().into())
+            .collect();
+        let fn_type = if let Some(ty) = self.llvm_type(&function.return_ty) {
+            ty.fn_type(&args, false)
         } else {
-            // TODO: Conversion from rxir::Type to LLVMType
             self.context.void_type().fn_type(&args, false)
         };
         let llvm_fn = self
@@ -64,17 +80,65 @@ impl<'ctx> LLVMCodegenBackend<'ctx> {
         llvm_fn.set_linkage(inkwell::module::Linkage::External);
         llvm_fn.set_call_conventions(LLVMCallConv::LLVMCCallConv as u32);
         let entry = self.context.append_basic_block(llvm_fn, "entry");
+        let mut meta = BlockMeta::new();
+        for (idx, (id, ty)) in function.arguments.iter().enumerate() {
+            let value = llvm_fn.get_nth_param(idx as u32).unwrap();
+            meta.variables.insert(*id, value);
+        }
         self.builder.position_at_end(entry);
-        if is_main {
-            // TODO: We will probably need to do some sort of 'find and replace' here, since the
-            // expression codegen will automatically generate a return statement for us.
-            self.builder
-                .build_return(Some(&self.context.i32_type().const_int(0, false)))
-                .unwrap();
-        } else {
-            self.builder.build_return(None).unwrap();
+        let block = module.blocks.get(&function.entry).unwrap();
+        self.compile_block(block, &meta)?;
+        Ok(())
+    }
+
+    fn compile_block(&self, block: &rxir::Block, meta: &BlockMeta) -> Result<(), String> {
+        for instruction in &block.instructions {
+            self.compile_instruction(block, instruction, meta)?;
         }
         Ok(())
+    }
+
+    fn compile_instruction(
+        &self,
+        block: &rxir::Block,
+        instruction: &rxir::Instruction,
+        meta: &BlockMeta,
+    ) -> Result<(), String> {
+        match instruction {
+            rxir::Instruction::Alloca { dest, ty } => unimplemented!(),
+            rxir::Instruction::Return { value } => match value {
+                None => self.builder.build_return(None).unwrap(),
+                Some(Operand::Immediate { ty, value }) => self
+                    .builder
+                    .build_return(Some(&self.llvm_value(ty, *value)?))
+                    .unwrap(),
+                Some(Operand::TempVar { ty: _, id }) => {
+                    let value = meta.variables.get(id).unwrap();
+                    self.builder.build_return(Some(value)).unwrap()
+                }
+            },
+
+            rxir::Instruction::Load { dest, src } => unimplemented!(),
+            rxir::Instruction::Store { dest, src } => unimplemented!(),
+        };
+        Ok(())
+    }
+
+    fn llvm_value(&self, ty: &rxir::Type, value: u64) -> Result<BasicValueEnum<'ctx>, String> {
+        match ty {
+            rxir::Type::Void => unreachable!(),
+            rxir::Type::Signed32 => {
+                // We need to bitcast the value to i32
+                Ok(self.context.i32_type().const_int(value, false).into())
+            }
+        }
+    }
+
+    fn llvm_type(&self, ty: &rxir::Type) -> Option<BasicTypeEnum<'ctx>> {
+        match ty {
+            rxir::Type::Void => None,
+            rxir::Type::Signed32 => Some(self.context.i32_type().into()),
+        }
     }
 }
 

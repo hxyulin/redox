@@ -13,6 +13,12 @@ pub struct NumberType {
     pub bits: u32,
 }
 
+impl From<NumberType> for Type {
+    fn from(ty: NumberType) -> Self {
+        Type::Number(ty)
+    }
+}
+
 impl NumberType {
     pub const I32: Self = Self {
         kind: NumberKind::Signed,

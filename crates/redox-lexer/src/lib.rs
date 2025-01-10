@@ -24,6 +24,13 @@ impl std::fmt::Display for LexerError {
 #[logos(error = LexerError)]
 #[logos(skip r"[\s\n\r]+")]
 pub enum Token {
+    #[regex(r"//[^\n\r]*", logos::skip)]
+    Comment,
+    #[regex(r"/\*")]
+    OpenComment,
+    #[regex(r"\*/")]
+    CloseComment,
+
     #[token("fn")]
     KwFn,
     #[token("return")]
@@ -46,6 +53,11 @@ pub enum Token {
 
     #[token("->")]
     Arrow,
+
+    #[token(",")]
+    Comma,
+    #[token(":")]
+    Colon,
 
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     Ident(String),

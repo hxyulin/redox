@@ -29,7 +29,7 @@ impl<T> Wrapped<T> {
 impl ExprKind {
     fn get_children(&self) -> Vec<Box<Expr>> {
         match self {
-            ExprKind::Literal(_) => Vec::new(),
+            ExprKind::Literal(_) | ExprKind::Variable(_) => Vec::new(),
             ExprKind::Return(expr) => {
                 if let Some(expr) = expr {
                     vec![expr.clone()]
@@ -53,6 +53,7 @@ impl ExprKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Literal(Literal),
+    Variable(String),
     Return(Option<Box<Expr>>),
     FunctionDef(FunctionDef),
 }
@@ -76,7 +77,7 @@ impl TopLevel {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDef {
     pub name: String,
-    // Could be unknown, and deduced during type checking
+    pub arguments: Vec<(String, Type)>,
     pub return_ty: Option<Type>,
     pub attributes: Attributes,
     pub body: Block,

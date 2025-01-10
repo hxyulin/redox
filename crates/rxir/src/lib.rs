@@ -13,19 +13,21 @@ pub enum IRBuildType {
 }
 
 #[derive(Debug, Clone)]
-pub struct TempVar {}
+pub struct TempVar {
+    ty: Type,
+}
 
 #[derive(Debug, Clone)]
 pub enum Operand {
-    Immediate(i64),
-    TempVar(TempVarId),
+    Immediate { ty: Type, value: u64 },
+    TempVar { ty: Type, id: TempVarId },
 }
 
 impl ToString for Operand {
     fn to_string(&self) -> String {
         match self {
-            Operand::Immediate(i) => format!("{}", i),
-            Operand::TempVar(i) => format!("%{}", i),
+            Operand::Immediate { ty, value } => format!("{} {}", ty.to_string(), value),
+            Operand::TempVar { ty, id } => format!("{} %{}", ty.to_string(), id),
         }
     }
 }
@@ -56,11 +58,18 @@ impl ToString for Module {
         let mut result = String::new();
         result.push_str(&format!("Module {}\n", self.name));
         for function in &self.functions {
+            let arguments = function
+                .arguments
+                .iter()
+                .map(|(name, ty)| format!("%{}: {}", name, ty.to_string()))
+                .collect::<Vec<String>>()
+                .join(", ");
             let associated_blocks = utils::get_related_blocks(self, function);
             result.push_str(&format!(
-                "Function {} {} {{\n",
+                "Function {} {} ({}) {{\n",
                 function.return_ty.to_string(),
-                function.signature
+                function.signature,
+                arguments
             ));
 
             for block in associated_blocks {
@@ -80,15 +89,32 @@ impl ToString for Module {
 pub struct Function {
     /// This string can only be ascii, and is the mangled name of the function.
     pub signature: String,
+    pub arguments: Vec<(TempVarId, Type)>,
     pub entry: BlockId,
     pub return_ty: Type,
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct Block {
-    // The id is just the index in the blocks vector.
+    var_count: TempVarId,
     pub temporaries: Vec<TempVar>,
     pub instructions: Vec<Instruction>,
+}
+
+impl Block {
+    pub fn new() -> Self {
+        Self {
+            var_count: 0,
+            temporaries: Vec::new(),
+            instructions: Vec::new(),
+        }
+    }
+
+    pub fn create_var(&mut self, ty: Type) -> TempVarId {
+        self.temporaries.push(TempVar { ty });
+        self.var_count += 1;
+        self.var_count - 1
+    }
 }
 
 #[derive(Debug, Clone)]

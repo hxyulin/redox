@@ -1,4 +1,4 @@
-use crate::{Block, BlockId, Function, Instruction, Module, Type};
+use crate::{Block, BlockId, Function, Instruction, Module, TempVarId, Type};
 
 pub struct ModuleBuilder {
     blocks: Vec<Block>,
@@ -19,9 +19,28 @@ impl ModuleBuilder {
         self.blocks.len() - 1
     }
 
-    pub fn build_function(&mut self, signature: String, return_ty: Type, entry: BlockId) {
+    pub fn get_block(&self, block: BlockId) -> &Block {
+        &self.blocks[block]
+    }
+
+    pub fn get_block_mut(&mut self, block: BlockId) -> &mut Block {
+        &mut self.blocks[block]
+    }
+
+    pub fn get_var_type(&self, block: BlockId, id: TempVarId) -> Type {
+        self.get_block(block).temporaries[id].ty.clone()
+    }
+
+    pub fn build_function(
+        &mut self,
+        signature: String,
+        arguments: Vec<(TempVarId, Type)>,
+        return_ty: Type,
+        entry: BlockId,
+    ) {
         let function = Function {
             signature,
+            arguments,
             return_ty,
             entry,
         };
