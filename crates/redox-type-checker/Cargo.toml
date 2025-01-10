@@ -5,5 +5,6 @@ version.workspace = true
 authors.workspace = true
 
 [dependencies]
+tracing.workspace = true
 redox-ast.workspace = true
 thiserror.workspace = true

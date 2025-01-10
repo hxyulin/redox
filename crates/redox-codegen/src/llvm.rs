@@ -9,6 +9,7 @@ use inkwell::{
     targets::{Target, TargetMachine},
     types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum},
     values::{BasicValue, BasicValueEnum},
+    AddressSpace,
 };
 use rxir::Operand;
 
@@ -81,9 +82,9 @@ impl<'ctx> LLVMCodegenBackend<'ctx> {
         llvm_fn.set_call_conventions(LLVMCallConv::LLVMCCallConv as u32);
         let entry = self.context.append_basic_block(llvm_fn, "entry");
         let mut meta = BlockMeta::new();
-        for (idx, (id, ty)) in function.arguments.iter().enumerate() {
+        for (idx, (id, _ty)) in function.arguments.iter().enumerate() {
             let value = llvm_fn.get_nth_param(idx as u32).unwrap();
-            meta.variables.insert(*id, value);
+            meta.variables.insert(id.clone(), value);
         }
         self.builder.position_at_end(entry);
         let block = module.blocks.get(&function.entry).unwrap();
@@ -126,7 +127,7 @@ impl<'ctx> LLVMCodegenBackend<'ctx> {
 
     fn llvm_value(&self, ty: &rxir::Type, value: u64) -> Result<BasicValueEnum<'ctx>, String> {
         match ty {
-            rxir::Type::Void => unreachable!(),
+            rxir::Type::Void | rxir::Type::Pointer(_) => unreachable!(),
             rxir::Type::Signed32 => {
                 // We need to bitcast the value to i32
                 Ok(self.context.i32_type().const_int(value, false).into())
@@ -138,6 +139,7 @@ impl<'ctx> LLVMCodegenBackend<'ctx> {
         match ty {
             rxir::Type::Void => None,
             rxir::Type::Signed32 => Some(self.context.i32_type().into()),
+            rxir::Type::Pointer(_) => Some(self.context.ptr_type(AddressSpace::default()).into()),
         }
     }
 }

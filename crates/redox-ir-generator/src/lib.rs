@@ -1,5 +1,5 @@
 use redox_ast::{Block, Expr, ExprKind, Literal, TopLevel, TopLevelKind, Type as AstType};
-use rxir::{BlockId, Function, Module, ModuleBuilder, Operand, TempVarId};
+use rxir::{BlockId, Module, ModuleBuilder, Operand, TempVarId};
 use std::collections::HashMap;
 
 // Now it has been type checked, any additional errors are panics
@@ -33,7 +33,7 @@ impl IrGenerator {
             self.generate_top_level(&mut module_builder, node);
         }
 
-        module_builder.build(ops.name)
+        module_builder.build(ops.name.parse().expect("Invalid module name"))
     }
 
     fn generate_top_level(&mut self, builder: &mut ModuleBuilder, node: TopLevel) {
@@ -41,27 +41,26 @@ impl IrGenerator {
             // We need a seperate top level expr generator
             TopLevelKind::Expr(expr) => match &expr.kind {
                 ExprKind::FunctionDef(function) => {
-                    let entry = builder.create_block();
-                    let block = builder.get_block_mut(entry);
+                    let entry = builder.create_block(None);
                     let mut block_meta = BlockMeta::new();
                     let arguments = function
                         .arguments
                         .iter()
                         .map(|(name, ty)| {
                             let ty = Self::rxir_type(ty);
-                            let id = block.create_var(ty.clone());
-                            block_meta.variables.insert(name.clone(), id);
+                            let id = builder.create_value(&entry, ty.clone(), None);
+                            block_meta.variables.insert(name.clone(), id.clone());
                             (id, ty)
                         })
                         .collect();
                     builder.build_function(
-                        function.name.clone(),
+                        function.name.parse().expect("Invalid function name"),
                         arguments,
                         Self::rxir_type(function.return_ty.as_ref().unwrap()),
-                        entry,
+                        entry.clone(),
                     );
 
-                    self.generate_block(builder, entry, &function.body, &mut block_meta);
+                    self.generate_block(builder, &entry, &function.body, &mut block_meta);
                 }
                 _ => todo!(),
             },
@@ -71,19 +70,19 @@ impl IrGenerator {
     fn generate_block(
         &mut self,
         builder: &mut ModuleBuilder,
-        block: BlockId,
+        block: &BlockId,
         body: &Block,
         meta: &mut BlockMeta,
     ) {
         for statement in &body.statements {
-            self.generate_instruction(builder, block, statement, meta);
+            self.generate_instruction(builder, &block, statement, meta);
         }
     }
 
     fn generate_instruction(
         &mut self,
         builder: &mut ModuleBuilder,
-        block: BlockId,
+        block: &BlockId,
         expr: &Expr,
         meta: &mut BlockMeta,
     ) {
@@ -100,8 +99,8 @@ impl IrGenerator {
                         ExprKind::Variable(name) => {
                             let id = meta.variables.get(name).unwrap();
                             Operand::TempVar {
-                                ty: builder.get_var_type(block, *id),
-                                id: *id,
+                                ty: builder.get_var_type(block, id),
+                                id: id.clone(),
                             }
                         }
                         _ => todo!(),

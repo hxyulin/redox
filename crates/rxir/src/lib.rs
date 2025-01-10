@@ -1,15 +1,42 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Write};
 
+/// RXIR Representation:
+/// - variables prefixed with '%' are temporary variables
+/// - variables prefixed with '@' are block labels
 mod builder;
-pub use builder::*;
+mod operand;
 mod pass;
-pub use pass::*;
+pub use crate::{builder::*, operand::*, pass::*};
+pub use ascii::AsciiString;
 
-#[derive(Debug, Clone)]
-pub enum IRBuildType {
-    DynamicLibrary,
-    StaticLibrary,
-    Executable { entry: BlockId },
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum TempVarId {
+    Generated(usize),
+    Named(AsciiString),
+}
+
+impl ToString for TempVarId {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Generated(size) => format!("%{size}"),
+            Self::Named(name) => format!("%{name}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum BlockId {
+    Generated(usize),
+    Named(AsciiString),
+}
+
+impl ToString for BlockId {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Generated(size) => format!("@{size}"),
+            Self::Named(name) => format!("@{name}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -18,102 +45,71 @@ pub struct TempVar {
 }
 
 #[derive(Debug, Clone)]
-pub enum Operand {
-    Immediate { ty: Type, value: u64 },
-    TempVar { ty: Type, id: TempVarId },
-}
-
-impl ToString for Operand {
-    fn to_string(&self) -> String {
-        match self {
-            Operand::Immediate { ty, value } => format!("{} {}", ty.to_string(), value),
-            Operand::TempVar { ty, id } => format!("{} %{}", ty.to_string(), id),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct RedoxIR {
-    pub build_type: IRBuildType,
-    pub modules: Vec<Module>,
-}
-
-/// THis is just the index, which is managed in the state of the IR
-/// builder.
-pub type BlockId = usize;
-pub type TempVarId = usize;
-
-#[derive(Debug, Clone)]
 pub struct Module {
-    pub name: String,
+    pub name: AsciiString,
     pub blocks: HashMap<BlockId, Block>,
-    // TODO: We probably want to make FunctionIds to functions
     pub functions: Vec<Function>,
 }
 
-impl Module {}
-
 impl ToString for Module {
     fn to_string(&self) -> String {
-        let mut result = String::new();
-        result.push_str(&format!("Module {}\n", self.name));
+        let mut result = format!("module {}\n", self.name);
         for function in &self.functions {
-            let arguments = function
-                .arguments
-                .iter()
-                .map(|(name, ty)| format!("%{}: {}", name, ty.to_string()))
-                .collect::<Vec<String>>()
-                .join(", ");
-            let associated_blocks = utils::get_related_blocks(self, function);
-            result.push_str(&format!(
-                "Function {} {} ({}) {{\n",
-                function.return_ty.to_string(),
-                function.signature,
-                arguments
-            ));
-
-            for block in associated_blocks {
-                result.push_str(&format!("  Block {}\n", block));
-                for instruction in &self.blocks[&block].instructions {
-                    result.push_str(&format!("    {}\n", instruction.to_string()));
-                }
-            }
-
-            result.push_str("}\n");
+            result.push_str(&function.to_string(self));
         }
         result
     }
 }
 
+impl Module {}
+
 #[derive(Debug, Clone)]
 pub struct Function {
-    /// This string can only be ascii, and is the mangled name of the function.
-    pub signature: String,
+    pub signature: AsciiString,
     pub arguments: Vec<(TempVarId, Type)>,
     pub entry: BlockId,
     pub return_ty: Type,
 }
 
+impl Function {
+    fn to_string(&self, module: &Module) -> String {
+        let arguments = self
+            .arguments
+            .iter()
+            .map(|(id, ty)| format!("{}: {ty}", id.to_string()))
+            .collect::<Vec<String>>()
+            .join(", ");
+        let mut result = format!(
+            "fn {} {} ({}) {{\n",
+            self.return_ty, self.signature, arguments
+        );
+
+        let associated_blocks = utils::get_related_blocks(module, self);
+        for id in associated_blocks {
+            let block = module.blocks.get(&id).unwrap();
+            result.push_str(&format!("{}:\n", id.to_string()));
+            result.push_str(&block.to_string());
+        }
+
+        result.push_str("}\n");
+        result
+    }
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct Block {
-    var_count: TempVarId,
-    pub temporaries: Vec<TempVar>,
     pub instructions: Vec<Instruction>,
 }
 
-impl Block {
-    pub fn new() -> Self {
-        Self {
-            var_count: 0,
-            temporaries: Vec::new(),
-            instructions: Vec::new(),
+impl ToString for Block {
+    fn to_string(&self) -> String {
+        let mut result = String::new();
+        for instruction in &self.instructions {
+            result.push_str("\t");
+            result.push_str(instruction.to_string().as_str());
+            result.push('\n');
         }
-    }
-
-    pub fn create_var(&mut self, ty: Type) -> TempVarId {
-        self.temporaries.push(TempVar { ty });
-        self.var_count += 1;
-        self.var_count - 1
+        result
     }
 }
 
@@ -121,41 +117,61 @@ impl Block {
 pub enum Type {
     Void,
     Signed32,
+    Pointer(Box<Type>),
 }
 
-impl ToString for Type {
-    fn to_string(&self) -> String {
+impl Type {
+    pub fn pointer(ty: Type) -> Self {
+        Type::Pointer(Box::new(ty))
+    }
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Void => "void".to_string(),
-            Type::Signed32 => "s32".to_string(),
+            Type::Void => f.write_str("void"),
+            Type::Signed32 => f.write_str("i32"),
+            Type::Pointer(ty) => f.write_fmt(format_args!("{}*", *ty)),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum Instruction {
-    Alloca { dest: TempVarId, ty: Type },
-    Return { value: Option<Operand> },
-    Load { dest: TempVarId, src: TempVarId },
-    Store { dest: TempVarId, src: Operand },
+    /// Allocates a new variable on the stack, returns it into the variable at the given id, which
+    /// is a pointer to the type, which needs to be loaded into a register
+    Alloca {
+        dest: TempVarId,
+        ty: Type,
+    },
+    Return {
+        value: Option<Operand>,
+    },
+    Load {
+        dest: TempVarId,
+        src: TempVarId,
+    },
+    Store {
+        dest: TempVarId,
+        src: Operand,
+    },
 }
 
 impl ToString for Instruction {
     fn to_string(&self) -> String {
         match self {
-            Instruction::Alloca { dest, ty } => format!("Alloca {} {}", dest, ty.to_string()),
-            Instruction::Return { value } => format!(
-                "Return {}",
-                value.clone().map_or("void".to_string(), |v| v.to_string())
-            ),
-            Instruction::Load { dest, src } => format!("Load %{} %{}", dest, src),
-            Instruction::Store { dest, src } => format!("Store %{} {}", dest, src.to_string()),
+            Self::Alloca { dest, ty } => format!("{} = alloca {}", dest.to_string(), ty),
+            Self::Return { value } => match value {
+                None => "return void".to_string(),
+                Some(value) => format!("return {} {}", value.ty(), value.to_string()),
+            },
+            Self::Load { .. } | Self::Store { .. } => unimplemented!(),
         }
     }
 }
 
 // Example: store 42 in a stack variable (pseudo-code, not actually how the IR will look)
-// let a = alloca i32
+// let a = alloca i32 // 'a' have type (*i32)
 // store 42 in a
 // return a
 // // or
@@ -170,22 +186,26 @@ pub mod utils {
     /// Gets all the blocks that are related to the given function, ordered in the order of execution
     pub fn get_related_blocks(module: &Module, function: &Function) -> Vec<BlockId> {
         let mut blocks = Vec::new();
-        blocks.push(function.entry);
+        blocks.push(function.entry.clone());
         let mut visited: HashSet<BlockId> = HashSet::new();
-        let mut temp = vec![function.entry];
+        let mut temp = vec![function.entry.clone()];
         // Now we iterate through the blocks, always starting with the first block, and prepending
         // to the blocks that have already visited, so the blocks are ordered in the correct order
         // when executing
 
         while let Some(block) = temp.pop() {
             let connected_blocks = get_connected_blocks(module, &block);
-            let connected_blocks = connected_blocks.iter().filter(|blk| {
-                if visited.contains(blk) {
-                    return false;
-                }
-                visited.insert(**blk);
-                true
-            });
+            let connected_blocks = connected_blocks
+                .iter()
+                .filter(|blk| {
+                    let blk = (*blk).clone();
+                    if visited.contains(&blk) {
+                        return false;
+                    }
+                    visited.insert(blk);
+                    true
+                })
+                .cloned();
             // We reverse the order so that the blocks are ordered in the correct order
             temp.extend(connected_blocks.rev());
             // TODO: We need to add it to the blocks, but we need to make sure that we add it in

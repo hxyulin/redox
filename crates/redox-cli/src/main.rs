@@ -14,13 +14,12 @@ use redox_type_checker::TypeChecker;
 #[derive(Parser, Debug, Clone)]
 struct Args {
     input: InputPath,
-    #[clap(short, long, default_value = "false")]
-    verbose: bool,
+    #[clap(short, long, default_value = "0")]
+    verbose: u32,
 }
 
 fn main() {
     let args = Args::parse();
-
 
     let mut contents = String::new();
     args.input
@@ -29,7 +28,19 @@ fn main() {
         .read_to_string(&mut contents)
         .unwrap();
 
-    if args.verbose {
+    if args.verbose >= 3 {
+        eprintln!("Invalid verbose level (0-3)");
+        std::process::exit(1);
+    }
+
+    if args.verbose >= 1 {
+        eprintln!("Redox Compiler");
+        eprintln!("Version: {}", env!("CARGO_PKG_VERSION"));
+
+        std::fs::create_dir_all("build").unwrap();
+    }
+
+    if args.verbose >= 2 {
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::TRACE)
             .with_target(false)
@@ -39,10 +50,8 @@ fn main() {
             .with_thread_names(false)
             .init();
 
-        std::fs::create_dir_all("build").unwrap();
-        println!("Contents:\n{}", contents);
-
         println!("Lexer Output:");
+        println!("Contents:\n{}", contents);
         let lexer = Token::lexer(&contents);
         for token in lexer {
             println!("{:?}", token.unwrap());
@@ -50,7 +59,7 @@ fn main() {
     }
 
     let mut ast = RedoxParser::with_source(&contents).parse().unwrap();
-    if args.verbose {
+    if args.verbose >= 1 {
         let path = std::path::PathBuf::from("build/main.rxast");
         std::fs::write(path, redox_ast::utils::to_string(&ast)).unwrap();
     }
@@ -58,7 +67,7 @@ fn main() {
     let mut type_checker = TypeChecker::new();
     type_checker.type_check(&mut ast).unwrap();
 
-    if args.verbose {
+    if args.verbose >= 1 {
         let path = std::path::PathBuf::from("build/main_typed.rxast");
         std::fs::write(path, redox_ast::utils::to_string(&ast)).unwrap();
     }
@@ -71,7 +80,7 @@ fn main() {
         ast,
     );
 
-    if args.verbose {
+    if args.verbose >= 1 {
         let path = std::path::PathBuf::from("build/main.rxir");
         std::fs::write(path, module.to_string()).unwrap();
     }

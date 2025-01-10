@@ -1,5 +1,6 @@
 use redox_ast::{Block, Expr, ExprKind, TopLevel, TopLevelKind, Type};
 use std::collections::HashMap;
+use tracing::instrument;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum TypeCheckError {
@@ -46,8 +47,10 @@ impl TypeChecker {
         Self {}
     }
 
+    #[instrument(skip(self, ast))]
     pub fn type_check(&mut self, ast: &mut Vec<TopLevel>) -> Result<(), TypeCheckError> {
         for node in &mut *ast {
+            tracing::trace!("Type checking node");
             match &mut node.kind {
                 TopLevelKind::Expr(expr) => match &mut expr.kind {
                     ExprKind::FunctionDef(function) => {
@@ -75,16 +78,19 @@ impl TypeChecker {
         Ok(())
     }
 
+    #[instrument(skip(self, block, ctx))]
     fn evaluate_block(
         &mut self,
         block: &mut Block,
         ctx: &mut FunctionContext,
     ) -> Result<bool, TypeCheckError> {
+        tracing::trace!("Evaluating block");
         let mut block_ctx = BlockContext::new();
         for arg in &ctx.arguments {
             block_ctx.variables.insert(arg.0.clone(), arg.1.clone());
         }
-        for (idx, statement) in &mut block.statements.iter_mut().enumerate() {
+        for (_idx, statement) in &mut block.statements.iter_mut().enumerate() {
+            tracing::trace!("Evaluating statement {_idx}");
             if self.evaluate_expr(statement, ctx, &mut block_ctx)? {
                 return Ok(true);
             }
@@ -95,12 +101,14 @@ impl TypeChecker {
     /// Returns a type, and whether of not it was not a return statement
     // TODO: This architecture is bad, since return statements should return '()', and not an
     // actual type
+    #[instrument(skip(self, statement, ctx, block_ctx))]
     fn evaluate_expr(
         &mut self,
         statement: &mut Expr,
         ctx: &mut FunctionContext,
         block_ctx: &mut BlockContext,
     ) -> Result<bool, TypeCheckError> {
+        tracing::trace!("Evaluating expression");
         // TODO: Control Flow evaluation
         match &mut statement.kind {
             ExprKind::Return(expr) => match expr {
