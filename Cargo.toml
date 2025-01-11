@@ -18,12 +18,16 @@ members = [
     "crates/redox-lexer",
     "crates/redox-parser",
     "crates/redox-type-checker",
+    "crates/redox-parser-proc",
+    "crates/redox-parser-proc-helper",
     "crates/rxir",
 ]
 default-members = [
     "crates/redox-ast",
     "crates/redox-lexer",
     "crates/redox-parser",
+    "crates/redox-parser-proc",
+    "crates/redox-parser-proc-helper",
     "crates/rxir",
     "crates/redox-type-checker",
     "crates/redox-ir-generator",
@@ -34,7 +38,9 @@ default-members = [
 [workspace.dependencies]
 redox-ast = { path = "crates/redox-ast" }
 redox-lexer = { path = "crates/redox-lexer" }
+redox-parser-proc-helper = { path = "crates/redox-parser-proc-helper" }
 redox-parser = { path = "crates/redox-parser" }
+redox-parser-proc = { path = "crates/redox-parser-proc" }
 redox-type-checker = { path = "crates/redox-type-checker" }
 rxir = { path = "crates/rxir" }
 redox-ir-generator = { path = "crates/redox-ir-generator" }

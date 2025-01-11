@@ -2,47 +2,19 @@ use redox_ast::{
     Attributes, Block, Expr, ExprKind, FunctionDef, Literal, TopLevel, TopLevelKind, Type,
 };
 use redox_lexer::{Lexer, LexerError, LexerTrait, Span, Token};
+use redox_parser_proc_helper::*;
 use std::str::FromStr;
 use tracing::instrument;
 
 pub struct Parser<'ctx> {
-    lexer: Lexer<'ctx>,
-
-    // State
-    current_tok: Option<(Token, Span)>,
-}
-
-#[derive(Debug, thiserror::Error, Clone)]
-pub enum ParseError {
-    LexerError(LexerError),
-    UnexpectedEOF,
-    UnexpectedToken(Token),
-    UnclosedComment,
-}
-
-impl From<LexerError> for ParseError {
-    fn from(err: LexerError) -> Self {
-        Self::LexerError(err)
-    }
-}
-
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::LexerError(err) => err.fmt(f),
-            Self::UnexpectedEOF => write!(f, "Unexpected EOF"),
-            Self::UnexpectedToken(tok) => write!(f, "Unexpected token: {tok:?}"),
-            Self::UnclosedComment => write!(f, "Unclosed comment"),
-        }
-    }
+    helper: ParserHelper<'ctx>,
 }
 
 impl<'ctx> Parser<'ctx> {
     #[instrument(skip(lexer))]
     pub fn new(lexer: Lexer<'ctx>) -> Self {
         Self {
-            lexer,
-            current_tok: None,
+            helper: ParserHelper::new(lexer),
         }
     }
 
@@ -52,85 +24,11 @@ impl<'ctx> Parser<'ctx> {
     }
 
     #[instrument(skip(self))]
-    fn advance(&mut self) -> Result<Option<Token>, ParseError> {
-        // FIXME: This is very bad coding here, a lot of repeated code
-        tracing::trace!("Advance");
-        let tok = if let Some(tok) = self.lexer.next() {
-            let mut tok = tok?;
-            if tok == Token::OpenComment {
-                tracing::trace!("Open comment");
-                let mut broken = false;
-                while let Some(tok) = self.lexer.next() {
-                    tracing::trace!(?tok, "Comment token");
-                    if tok? == Token::CloseComment {
-                        tracing::trace!("Close comment");
-                        broken = true;
-                        break;
-                    }
-                }
-
-                if !broken {
-                    return Err(ParseError::UnclosedComment);
-                }
-
-                if let Some(new_tok) = self.lexer.next() {
-                    tok = new_tok?;
-                } else {
-                    self.current_tok = None;
-                    return Ok(None);
-                };
-            }
-            tok
-        } else {
-            self.current_tok = None;
-            return Ok(None);
-        };
-
-        self.current_tok = Some((tok.clone(), self.lexer.span()));
-        Ok(Some(tok))
-    }
-
-    #[instrument(skip(self))]
-    fn advance_no_eof(&mut self) -> Result<Token, ParseError> {
-        tracing::trace!("Advance ensuring no EOF");
-        self.advance()?.ok_or(ParseError::UnexpectedEOF)
-    }
-
-    #[instrument(skip(self))]
-    fn current(&mut self) -> Result<Token, ParseError> {
-        tracing::trace!("Current token");
-        self.current_tok
-            .as_ref()
-            .ok_or(ParseError::UnexpectedEOF)
-            .map(|t| t.0.clone())
-    }
-
-    #[instrument(skip(self))]
-    fn expect_advance(&mut self, expected: Token) -> Result<Token, ParseError> {
-        tracing::trace!(?expected, "Expecting advance");
-        let tok = self.advance()?.ok_or(ParseError::UnexpectedEOF)?;
-        if tok != expected {
-            return Err(ParseError::UnexpectedToken(tok));
-        }
-        Ok(tok)
-    }
-
-    #[instrument(skip(self))]
-    fn expect(&mut self, expected: Token) -> Result<(), ParseError> {
-        tracing::trace!(?expected, "Expecting token");
-        let tok = self.current()?;
-        if tok != expected {
-            return Err(ParseError::UnexpectedToken(tok));
-        }
-        Ok(())
-    }
-
-    #[instrument(skip(self))]
     pub fn parse(&mut self) -> Result<Vec<TopLevel>, ParseError> {
         tracing::trace!("Started parsing");
         let mut top_levels = Vec::new();
 
-        while let Some(tok) = self.advance()? {
+        while let Some(tok) = self.helper.advance()? {
             match tok {
                 Token::KwFn => top_levels.push(TopLevel::expr(self.parse_function_def()?)),
                 _ => todo!(),
@@ -143,23 +41,25 @@ impl<'ctx> Parser<'ctx> {
     fn parse_function_def(&mut self) -> Result<Expr, ParseError> {
         tracing::trace!("Parsing function definition");
         let attributes: Attributes = Vec::new();
-        let name = match self.advance_no_eof()? {
+        self.helper.advance()?;
+        let name = match self.helper.current()? {
             Token::Ident(ident) => ident,
-            _ => todo!(),
+            tok => return Err(ParseError::UnexpectedToken(tok)),
         };
-
-        self.expect_advance(Token::LeftParen)?;
+        self.helper.advance_no_eof()?;
+        self.helper.expect(Token::LeftParen)?;
+        self.helper.advance_no_eof()?;
         let arguments = self.parse_typed_argument_list()?;
         tracing::trace!(?arguments, "Parsed arguments");
-        self.expect(Token::RightParen)?;
+        self.helper.expect(Token::RightParen)?;
 
-        let return_ty = if let Token::Arrow = self.advance_no_eof()? {
-            self.advance_no_eof()?;
+        let return_ty = if let Token::Arrow = self.helper.advance_no_eof()? {
+            self.helper.advance_no_eof()?;
             Some(self.parse_type()?)
         } else {
             None
         };
-        self.expect(Token::LeftBrace)?;
+        self.helper.expect(Token::LeftBrace)?;
         let body = self.parse_block()?;
         // Parse block already consumes the right brace, and we dont' need to check for it here
 
@@ -181,7 +81,7 @@ impl<'ctx> Parser<'ctx> {
         tracing::trace!("Parsing block");
         let mut statements = Vec::new();
 
-        while let Some(tok) = self.advance()? {
+        while let Some(tok) = self.helper.advance()? {
             match tok {
                 Token::RightBrace => break,
                 Token::LeftBrace => unimplemented!("Nested blocks are not yet supported"),
@@ -201,90 +101,86 @@ impl<'ctx> Parser<'ctx> {
     #[instrument(skip(self))]
     fn parse_statement(&mut self) -> Result<Expr, ParseError> {
         tracing::trace!("Parsing statement");
-        // TODO: We need to respect semiclons
-        let res = match self.current()? {
-            Token::KwReturn => {
-                self.advance()?;
-                let expr = self.parse_expr()?;
-                Expr::new(
-                    ExprKind::Return(Some(Box::new(expr))),
-                    std::ops::Range::default(),
-                )
-            }
-            _ => self.parse_expr()?,
-        };
-
-        self.expect(Token::Semicolon)?;
-        // Consume the semicolon
-        self.advance()?;
-        Ok(res)
+        redox_parser_proc::parse_rule! {
+            expr:expr ";" => Ok(expr),
+        }
     }
 
     #[instrument(skip(self))]
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
         tracing::trace!("Parsing expression");
-        match self.current()? {
-            Token::NumberLit(num) => {
-                self.advance()?;
-                Ok(Expr::new(
-                    ExprKind::Literal(Literal::Number(num)),
-                    std::ops::Range::default(),
-                ))
-            }
-            Token::KwReturn => self.parse_statement(),
-            Token::Ident(name) => {
-                self.advance()?;
-                Ok(Expr::new(
-                    ExprKind::Variable(name),
-                    std::ops::Range::default(),
-                ))
-            }
-            tok => todo!("Unexpected token (unimplemented): {:?}", tok),
+        redox_parser_proc::parse_rule! {
+            number:number => Ok(Expr::new(
+                ExprKind::Literal(Literal::Number(number)),
+                std::ops::Range::default(),
+            )),
+            ident:ident => Ok(Expr::new(
+                ExprKind::Variable(ident),
+                std::ops::Range::default(),
+            )),
+            "return" expr:expr => Ok(Expr::new(
+                ExprKind::Return(Some(Box::new(expr))),
+                std::ops::Range::default(),
+            )),
         }
     }
 
     /// Parses a type, assuming the first token is consumed
     #[instrument(skip(self))]
     fn parse_type(&mut self) -> Result<Type, ParseError> {
-        tracing::trace!("Parsing type");
-        match self.current()? {
-            Token::LeftParen => match self.advance()?.ok_or(ParseError::UnexpectedEOF)? {
+        redox_parser_proc::parse_rule! {
+            ident:ident => Ok(Type::from_str(&ident).map_err(|_err| ParseError::UnexpectedToken(Token::Ident(ident)))?),
+            "(" ")" => Ok(Type::empty()),
+        }
+        /*
+        match self.helper.current()? {
+            Token::LeftParen => match self.helper.advance()?.ok_or(ParseError::UnexpectedEOF)? {
                 Token::RightParen => {
-                    self.advance()?;
+                    self.helper.advance()?;
                     Ok(Type::empty())
                 }
                 _ => unimplemented!("Proper type parsing is not yet implemented!"),
             },
             Token::Ident(ty) => {
-                self.advance()?;
+                self.helper.advance()?;
                 // TODO: Support custom error messages
                 Ok(Type::from_str(&ty)
                     .map_err(|_err| ParseError::UnexpectedToken(Token::Ident(ty)))?)
             }
             tok => Err(ParseError::UnexpectedToken(tok)),
         }
+        */
     }
 
     #[instrument(skip(self))]
     fn parse_typed_argument_list(&mut self) -> Result<Vec<(String, Type)>, ParseError> {
         tracing::trace!("Parsing typed argument list");
+
+        // For the first token, we dont error if it is not an ident
+        match self.helper.current() {
+            Ok(Token::Ident(_)) => (),
+            Ok(_) | Err(ParseError::UnexpectedEOF) => return Ok(Vec::new()),
+            Err(err) => return Err(err),
+        }
+
         let mut args = Vec::new();
-        while let Some(tok) = self.advance()? {
-            match tok {
+        loop {
+            match self.helper.current()? {
                 Token::Ident(name) => {
-                    self.advance()?;
-                    self.expect(Token::Colon)?;
-                    self.advance()?;
+                    self.helper.advance()?;
+                    self.helper.expect(Token::Colon)?;
+                    self.helper.advance()?;
                     let ty = self.parse_type()?;
                     tracing::trace!(?name, ?ty, "Parsed argument");
                     args.push((name, ty));
                 }
                 tok => return Err(ParseError::UnexpectedToken(tok)),
             }
-            match self.current()? {
-                Token::Comma => (),
-                _ => break,
-            }
+            match self.helper.current() {
+                Ok(Token::Comma) => self.helper.advance()?,
+                Ok(_) | Err(ParseError::UnexpectedEOF) => break,
+                Err(err) => return Err(err),
+            };
         }
         Ok(args)
     }
@@ -293,25 +189,129 @@ impl<'ctx> Parser<'ctx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use redox_ast::Block;
+    use pretty_assertions::assert_eq;
+    use redox_ast::NumberLiteral;
+    use rstest::rstest;
 
-    #[test]
-    fn test_parse_function_def() {
-        let mut parser = Parser::with_source("fn foo() {}");
+    // Helper function to create test cases
+    fn setup_parser(input: &str) -> Parser {
+        Parser::with_source(input)
+    }
+
+    #[rstest]
+    #[case("fn foo() {}", "foo", vec![], None, Block::empty())]
+    #[case("fn add(x: i32) {}", "add", vec![("x".to_string(), Type::from_str("i32").unwrap())], None, Block::empty())]
+    #[case("fn ret() -> i32 {}", "ret", vec![], Some(Type::from_str("i32").unwrap()), Block::empty())]
+    fn test_function_def(
+        #[case] input: &str,
+        #[case] expected_name: &str,
+        #[case] expected_args: Vec<(String, Type)>,
+        #[case] expected_return: Option<Type>,
+        #[case] expected_body: Block,
+    ) {
+        let mut parser = setup_parser(input);
         let top_levels = parser.parse().unwrap();
         assert_eq!(top_levels.len(), 1);
-        assert_eq!(
-            top_levels[0],
-            TopLevel::expr(Expr::new(
-                ExprKind::FunctionDef(FunctionDef {
-                    name: "foo".to_string(),
-                    arguments: Vec::new(),
-                    return_ty: None,
-                    attributes: Vec::new(),
-                    body: Block::empty(),
-                }),
+        match &top_levels[0].kind {
+            TopLevelKind::Expr(expr) => match &expr.kind {
+                ExprKind::FunctionDef(def) => {
+                    assert_eq!(def.name, expected_name);
+                    assert_eq!(def.arguments, expected_args);
+                    assert_eq!(def.return_ty, expected_return);
+                    assert_eq!(def.body, expected_body);
+                }
+                _ => panic!("Expected FunctionDef"),
+            },
+        }
+    }
+
+    #[rstest]
+    #[case(
+        "return 42;",
+        ExprKind::Return(Some(Box::new(Expr::new(
+            ExprKind::Literal(Literal::Number(NumberLiteral::int32(42))),
+            std::ops::Range::default()
+        ))))
+    )]
+    #[case("42;", ExprKind::Literal(Literal::Number(NumberLiteral::int32(42))))]
+    #[case("x;", ExprKind::Variable("x".to_string()))]
+    fn test_statement(#[case] input: &str, #[case] expected_kind: ExprKind) {
+        let mut parser = setup_parser(input);
+        parser.helper.advance().unwrap(); // Consume first token
+        let result = parser.parse_statement().unwrap();
+        assert_eq!(result.kind, expected_kind);
+    }
+
+    #[rstest]
+    #[case("42", ExprKind::Literal(Literal::Number(NumberLiteral::int32(42))))]
+    #[case("x", ExprKind::Variable("x".to_string()))]
+    #[case(
+        "return 42",
+        ExprKind::Return(Some(Box::new(Expr::new(
+            ExprKind::Literal(Literal::Number(NumberLiteral::int32(42))),
+            std::ops::Range::default()
+        ))))
+    )]
+    fn test_expression(#[case] input: &str, #[case] expected_kind: ExprKind) {
+        let mut parser = setup_parser(input);
+        parser.helper.advance().unwrap(); // Consume first token
+        let result = parser.parse_expr().unwrap();
+        assert_eq!(result.kind, expected_kind);
+    }
+
+    #[rstest]
+    #[case("i32", Type::from_str("i32").unwrap())]
+    #[case("()", Type::empty())]
+    fn test_type(#[case] input: &str, #[case] expected: Type) {
+        let mut parser = setup_parser(input);
+        parser.helper.advance().unwrap(); // Consume first token
+        let result = parser.parse_type().unwrap();
+        assert_eq!(result, expected);
+    }
+
+    #[rstest]
+    #[case("", vec![])]
+    #[case("x: i32", vec![("x".to_string(), Type::from_str("i32").unwrap())])]
+    #[case("x: i32, y: i32", vec![
+        ("x".to_string(), Type::from_str("i32").unwrap()),
+        ("y".to_string(), Type::from_str("i32").unwrap())
+    ])]
+    fn test_typed_argument_list(#[case] input: &str, #[case] expected: Vec<(String, Type)>) {
+        let mut parser = setup_parser(input);
+        parser.helper.advance().unwrap(); // Consume first token
+        let result = parser.parse_typed_argument_list().unwrap();
+        assert_eq!(result, expected);
+    }
+
+    #[rstest]
+    #[case("{}", Block::empty())]
+    #[case("{ return 42; }", Block {
+        statements: vec![Expr::new(
+            ExprKind::Return(Some(Box::new(Expr::new(
+                ExprKind::Literal(Literal::Number(NumberLiteral::int32(42))),
                 std::ops::Range::default()
-            ))
-        );
+            )))),
+            std::ops::Range::default()
+        )],
+        attributes: vec![]
+    })]
+    fn test_block(#[case] input: &str, #[case] expected: Block) {
+        let mut parser = setup_parser(input);
+        parser.helper.advance().unwrap(); // Consume first token
+        let result = parser.parse_block().unwrap();
+        assert_eq!(result, expected);
+    }
+
+    // Error case tests
+    #[rstest]
+    #[case(
+        "fn 42() {}",
+        ParseError::UnexpectedToken(Token::NumberLit(NumberLiteral::int32(42)))
+    )]
+    #[case("fn foo(x i32) {}", ParseError::UnexpectedToken(Token::Ident("i32".to_string())))]
+    fn test_function_def_errors(#[case] input: &str, #[case] expected_error: ParseError) {
+        let mut parser = setup_parser(input);
+        let result = parser.parse();
+        assert!(matches!(result, Err(ref e) if e == &expected_error));
     }
 }

@@ -1,6 +1,6 @@
-use std::ops::Range;
-pub use logos::{Logos as LexerTrait, Span};
 use logos::Logos;
+pub use logos::{Logos as LexerTrait, Span};
+use std::{ops::Range, str::FromStr};
 
 #[derive(Default, Debug, Clone, PartialEq, thiserror::Error)]
 pub enum LexerError {
@@ -64,6 +64,24 @@ pub enum Token {
 
     #[regex(r"[0-9]+", parse_num_literal)]
     NumberLit(redox_ast::NumberLiteral),
+}
+
+impl FromStr for Token {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "fn" => Ok(Token::KwFn),
+            "return" => Ok(Token::KwReturn),
+            ";" => Ok(Token::Semicolon),
+            "," => Ok(Token::Comma),
+            ":" => Ok(Token::Colon),
+            "(" => Ok(Token::LeftParen),
+            ")" => Ok(Token::RightParen),
+            "{" => Ok(Token::LeftBrace),
+            "}" => Ok(Token::RightBrace),
+            _ => Err(()),
+        }
+    }
 }
 
 fn parse_num_literal(lex: &mut Lexer) -> Result<redox_ast::NumberLiteral, LexerError> {

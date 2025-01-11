@@ -1,0 +1,10 @@
+[package]
+name = "redox-parser-proc-helper"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+redox-lexer.workspace = true
+redox-ast.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
