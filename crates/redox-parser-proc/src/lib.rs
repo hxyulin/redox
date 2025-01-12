@@ -19,6 +19,13 @@ enum RuleItem {
     CustomExpr(syn::Expr),
 }
 
+#[derive(Debug, PartialEq)]
+enum CaptureType {
+    Single,
+    Optional,
+    Multiple,
+}
+
 const CAPTURABLE_TOKS: [&str; 2] = ["ident", "number"];
 
 fn to_tok_ident(tok: &redox_lexer::Token) -> TokenStream2 {
@@ -74,10 +81,8 @@ impl RuleItem {
             }
         }
     }
-}
 
-impl quote::ToTokens for RuleItem {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
+    fn to_output(&self, stack: &mut Vec<CaptureType>, tokens: &mut TokenStream2) {
         match self {
             Self::Token(tok) => {
                 let tok: TokenStream2 = match tok {
@@ -136,14 +141,66 @@ impl quote::ToTokens for RuleItem {
             }
             Self::Sequence(toks) => {
                 for tok in toks {
-                    tok.to_tokens(tokens);
+                    stack.push(CaptureType::Single);
+                    tok.to_output(stack, tokens);
+                    stack.pop();
                 }
             }
             Self::CustomExpr(expr) => {
                 tokens.append_all(expr.into_token_stream());
             }
+            Self::Optional(item) => {
+                stack.push(CaptureType::Optional);
+                let mut pattern = TokenStream2::default();
+                item.to_pattern(&mut pattern);
+                let mut code = TokenStream2::default();
+                item.to_output(stack, &mut code);
+                let captures = item.get_captures(1);
+                tokens.append_all(quote! {
+                    match self.helper.current()? {
+                        #pattern => {
+                            #code
+                            (#(#captures),*)
+                        },
+                        tok => {
+                            // We return 'captures.len' amount of Nones in a tuple
+                            (None, #(#captures),*)
+                        }
+                    }
+                });
+                stack.pop();
+            }
             _ => unimplemented!(),
         }
+    }
+
+    fn get_captures(&self, depth: usize) -> Vec<String>{
+        let mut captures = Vec::new();
+        if depth == 0 {
+            return captures;
+        }
+        match self {
+            Self::Token(_) => {},
+            Self::NamedRule { capture_as, .. } => capture_as.clone(),
+            Self::Sequence(toks) => {
+                for tok in toks {
+                    captures.extend(tok.get_captures(depth - 1));
+                }
+                None
+            }
+            Self::Optional(tok) => tok.get_capture(depth - 1),
+            Self::ZeroOrMore(tok) => tok.get_capture(depth - 1),
+            Self::OneOrMore(tok) => tok.get_capture(depth - 1),
+            Self::CustomExpr(_) => {},
+        }
+    }
+}
+
+impl quote::ToTokens for RuleItem {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        let mut stack = Vec::new();
+        stack.push(CaptureType::Single);
+        self.to_output(&mut stack, tokens);
     }
 }
 

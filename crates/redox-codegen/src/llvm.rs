@@ -8,7 +8,7 @@ use inkwell::{
     module::Module,
     targets::{Target, TargetMachine},
     types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum},
-    values::{BasicValue, BasicValueEnum},
+    values::BasicValueEnum,
     AddressSpace,
 };
 use rxir::Operand;
@@ -29,6 +29,8 @@ pub struct LLVMCodegenBackend<'ctx> {
     context: &'ctx Context,
     builder: Builder<'ctx>,
     module: Module<'ctx>,
+
+    block_meta: HashMap<rxir::BlockId, BlockMeta<'ctx>>,
 }
 
 struct BlockMeta<'ctx> {
@@ -52,13 +54,14 @@ impl<'ctx> LLVMCodegenBackend<'ctx> {
             context: &context.context,
             builder,
             module,
+            block_meta: HashMap::new(),
         }
     }
 }
 
 impl<'ctx> LLVMCodegenBackend<'ctx> {
     fn compile_function(
-        &self,
+        &mut self,
         module: &rxir::Module,
         function: &rxir::Function,
     ) -> Result<(), String> {
@@ -86,41 +89,79 @@ impl<'ctx> LLVMCodegenBackend<'ctx> {
             let value = llvm_fn.get_nth_param(idx as u32).unwrap();
             meta.variables.insert(id.clone(), value);
         }
+        self.block_meta.insert(function.entry.clone(), meta);
         self.builder.position_at_end(entry);
         let block = module.blocks.get(&function.entry).unwrap();
-        self.compile_block(block, &meta)?;
+        self.compile_block(&function.entry, block)?;
         Ok(())
     }
 
-    fn compile_block(&self, block: &rxir::Block, meta: &BlockMeta) -> Result<(), String> {
+    fn compile_block(
+        &mut self,
+        block_id: &rxir::BlockId,
+        block: &rxir::Block,
+    ) -> Result<(), String> {
         for instruction in &block.instructions {
-            self.compile_instruction(block, instruction, meta)?;
+            self.compile_instruction(block_id, block, instruction)?;
         }
         Ok(())
     }
 
     fn compile_instruction(
-        &self,
-        block: &rxir::Block,
+        &mut self,
+        block_id: &rxir::BlockId,
+        _block: &rxir::Block,
         instruction: &rxir::Instruction,
-        meta: &BlockMeta,
     ) -> Result<(), String> {
         match instruction {
-            rxir::Instruction::Alloca { dest, ty } => unimplemented!(),
-            rxir::Instruction::Return { value } => match value {
-                None => self.builder.build_return(None).unwrap(),
-                Some(Operand::Immediate { ty, value }) => self
+            rxir::Instruction::Alloca { dest, ty } => {
+                // TODO: Untested
+                let value = self
                     .builder
-                    .build_return(Some(&self.llvm_value(ty, *value)?))
-                    .unwrap(),
+                    .build_alloca(self.llvm_type(ty).unwrap(), "")
+                    .unwrap();
+                let meta = self.block_meta.get_mut(block_id).unwrap();
+                meta.variables.insert(dest.clone(), value.into());
+            }
+            rxir::Instruction::Return { value } => match value {
+                None => {
+                    self.builder.build_return(None).unwrap();
+                }
+                Some(Operand::Immediate { ty, value }) => {
+                    self.builder
+                        .build_return(Some(&self.llvm_value(ty, *value)?))
+                        .unwrap();
+                }
                 Some(Operand::TempVar { ty: _, id }) => {
+                    let meta = self.block_meta.get(block_id).unwrap();
                     let value = meta.variables.get(id).unwrap();
-                    self.builder.build_return(Some(value)).unwrap()
+                    self.builder.build_return(Some(value)).unwrap();
                 }
             },
 
-            rxir::Instruction::Load { dest, src } => unimplemented!(),
-            rxir::Instruction::Store { dest, src } => unimplemented!(),
+            rxir::Instruction::Load { dest, src } => {
+                // TODO: Untested
+                let meta = self.block_meta.get(block_id).unwrap();
+                let value = meta.variables.get(src).unwrap();
+                let dest = meta.variables.get(dest).unwrap().into_pointer_value();
+                self.builder.build_store(dest, *value).unwrap();
+            }
+            rxir::Instruction::Store { dest, src } => {
+                // TODO: Untested
+                let meta = self.block_meta.get(block_id).unwrap();
+                match src {
+                    rxir::Operand::TempVar { ty: _, id } => {
+                        let value = meta.variables.get(id).unwrap();
+                        let dest = meta.variables.get(dest).unwrap().into_pointer_value();
+                        self.builder.build_store(dest, *value).unwrap();
+                    }
+                    rxir::Operand::Immediate { ty, value } => {
+                        let value = self.llvm_value(ty, *value).unwrap();
+                        let dest = meta.variables.get(dest).unwrap().into_pointer_value();
+                        self.builder.build_store(dest, value).unwrap();
+                    }
+                }
+            }
         };
         Ok(())
     }

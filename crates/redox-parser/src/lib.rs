@@ -1,7 +1,5 @@
-use redox_ast::{
-    Attributes, Block, Expr, ExprKind, FunctionDef, Literal, TopLevel, TopLevelKind, Type,
-};
-use redox_lexer::{Lexer, LexerError, LexerTrait, Span, Token};
+use redox_ast::{Attributes, Block, Expr, ExprKind, FunctionDef, Literal, TopLevel, Type};
+use redox_lexer::{Lexer, LexerTrait, Token};
 use redox_parser_proc_helper::*;
 use std::str::FromStr;
 use tracing::instrument;
@@ -132,24 +130,6 @@ impl<'ctx> Parser<'ctx> {
             ident:ident => Ok(Type::from_str(&ident).map_err(|_err| ParseError::UnexpectedToken(Token::Ident(ident)))?),
             "(" ")" => Ok(Type::empty()),
         }
-        /*
-        match self.helper.current()? {
-            Token::LeftParen => match self.helper.advance()?.ok_or(ParseError::UnexpectedEOF)? {
-                Token::RightParen => {
-                    self.helper.advance()?;
-                    Ok(Type::empty())
-                }
-                _ => unimplemented!("Proper type parsing is not yet implemented!"),
-            },
-            Token::Ident(ty) => {
-                self.helper.advance()?;
-                // TODO: Support custom error messages
-                Ok(Type::from_str(&ty)
-                    .map_err(|_err| ParseError::UnexpectedToken(Token::Ident(ty)))?)
-            }
-            tok => Err(ParseError::UnexpectedToken(tok)),
-        }
-        */
     }
 
     #[instrument(skip(self))]
@@ -190,7 +170,7 @@ impl<'ctx> Parser<'ctx> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-    use redox_ast::NumberLiteral;
+    use redox_ast::{NumberLiteral, TopLevelKind};
     use rstest::rstest;
 
     // Helper function to create test cases
